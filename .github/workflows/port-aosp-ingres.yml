@@ -112,7 +112,7 @@ on:
         required: false
         default: false
         type: boolean
-  # dipanggil workflow lain dengan default berbeda (mis. port-oxygenos-ingres.yml)
+  # dipanggil workflow lain dengan default berbeda (mis. port-coloros-ingres.yml)
   workflow_call:
     inputs:
       base_rom_url: { type: string, required: true }
@@ -137,6 +137,7 @@ on:
       release_repo: { type: string, required: false, default: "" }
       gdrive_upload: { type: boolean, required: false, default: false }
       port_flavor: { type: string, required: false, default: auto }
+      oplus_rom_name: { type: string, required: false, default: auto }
       oplus_debloat: { type: boolean, required: false, default: true }
       title: { type: string, required: false, default: "Port AOSP" }
     secrets:
@@ -330,6 +331,7 @@ jobs:
           RECOVERY_IMG: ${{ inputs.recovery_img_url }}
           # auto = donor OTA OxygenOS/ColorOS (partisi my_*) dikenali otomatis
           PORT_FLAVOR: ${{ inputs.port_flavor || 'auto' }}
+          OPLUS_ROM_NAME: ${{ inputs.oplus_rom_name || 'auto' }}
           OPLUS_DEBLOAT: ${{ inputs.oplus_debloat == false && 'false' || 'true' }}
           RELEASE_KEYS: ${{ inputs.release_keys == false && 'false' || 'true' }}
         run: |

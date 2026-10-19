@@ -1,29 +1,34 @@
-name: Port OxygenOS -> ingres
+name: Port ColorOS -> ingres
 
-# Port OxygenOS / ColorOS / realme UI (OPlus) ke ingres (POCO F4 GT / Redmi K50 Gaming).
-# Memanggil workflow "Port AOSP -> ingres" (port-aosp-ingres.yml) dengan mode OPlus:
-#   - base = LineageOS 23.2 ingres (default, Android 16): firmware, boot, vendor, odm,
-#     vendor_dlkm tetap dari base -> modul vendor cocok dengan kernel D2N 5.10.271-gki-MIX,
-#     fitur LineageOS dari base (Aperture, GameKeys, LED) & addon AOSP ikut dipasang
-#   - donor = OTA full OxygenOS/ColorOS/realme UI Android 16+ (.zip payload.bin): system,
-#     system_ext, product + partisi my_* (digabung ke /system, lihat scripts/oplus_port.sh)
-#   - sepolicy: type public system_ext base yang dipakai vendor tapi tidak ada di OxygenOS
-#     dijembatani (scripts/sepol_bridge.py)
-#   - kernel D2N dicek otomatis vs modul vendor base (tidak cocok = kernel stock base)
-#   - donor OxygenOS 15 (Android 15): ganti base ke HyperOS 2 stock ingres (Android 14),
-#     https://cdnorg.d.miui.com/OS2.0.5.0.ULJCNXM/ingres-ota_full-OS2.0.5.0.ULJCNXM-user-14.0-f4c2771903.zip
+# Port ColorOS (OPPO / OnePlus / realme, OPlus) khusus POCO F4 GT / Redmi K50 Gaming (ingres),
+# kombinasi vendor LineageOS 23.2 ingres. Memanggil workflow "Port AOSP -> ingres"
+# (port-aosp-ingres.yml) dengan mode OPlus (scripts/oplus_port.sh):
+#   - base = LineageOS 23.2 ingres (Android 16): firmware, boot, vendor, odm, vendor_dlkm dari
+#     base -> modul vendor cocok dengan kernel D2N 5.10.271-gki-MIX; fitur LineageOS dari base
+#     (Aperture kamera, GameKeys, LED) & addon AOSP ikut dipasang
+#   - donor = ColorOS Android 16+ (ColorOS 16 / 17):
+#       * OTA full OPPO/OnePlus/realme (.zip payload.bin, partisi my_* terpisah) -> my_* digabung
+#         ke /system, atau
+#       * ColorOS hasil port HP lain (zip recovery images/super.img, my_* sudah di system, mis.
+#         ColorOS 17 marble) -> my_* dipakai apa adanya
+#     boot/kernel, vendor & odm donor TIDAK dipakai (kernel port marble berisi driver OPlus
+#     khusus marble); yang diambil hanya system, system_ext, product, my_*
+#   - sepolicy: jembatan type public system_ext base (scripts/sepol_bridge.py) + permission
+#     vendor yang belum dikenal system donor dibuang (scripts/sepol_compat.py, mis. nlmsg)
+#   - donor OxygenOS/realme UI juga bisa (mesin yang sama), nama ROM di zip tetap otomatis kalau
+#     rom_name = auto
 # Tidak ada concurrency di sini: workflow yang dipanggil sudah mengantre per workflow.
 
 on:
   workflow_dispatch:
     inputs:
       base_rom_url:
-        description: "URL ROM base ingres (default LineageOS 23.2 ingres, Android 16 -> kernel D2N cocok). Donor OxygenOS 15: pakai HyperOS 2 stock ingres (lihat komentar workflow). Versi Android base harus <= donor"
+        description: "URL ROM base ingres (default LineageOS 23.2 ingres, Android 16 -> kernel D2N cocok). Versi Android base harus <= donor (ColorOS 16/17)"
         required: true
         default: "https://github.com/Ingres-Centre/LineageOS-Releases/releases/download/LineageOS-20260209-LAST/lineage-23.2-20260209-UNOFFICIAL-ingres.zip"
         type: string
       port_rom_url:
-        description: "URL OTA full OxygenOS/ColorOS/realme UI Android 16+ (.zip payload.bin, ada partisi my_*). Ideal SoC dekat: SM8450/SM8475"
+        description: "URL ROM ColorOS Android 16+ : OTA full OPPO/OnePlus/realme (.zip payload.bin, partisi my_*) atau ColorOS hasil port HP lain (zip images/super.img, mis. ColorOS 17 marble)"
         required: true
         type: string
       package_type:
@@ -58,6 +63,11 @@ on:
         description: "Addon (pisah spasi): miuicamera, dolby, touchrate, wfd, hotword. Dicek per versi Android & dependensi; gagal = dibatalkan otomatis. none = tanpa addon"
         required: false
         default: "miuicamera dolby touchrate wfd hotword"
+        type: string
+      rom_name:
+        description: "Nama ROM di nama zip & ringkasan: ColorOS (default) | auto (dari props donor: ColorOS / OxygenOS / realmeUI)"
+        required: false
+        default: ColorOS
         type: string
       oplus_debloat:
         description: "Pakai debloat_oplus.txt (kamera OPlus, overlay sidik jari di layar, stub pihak ketiga, app Google opsional)"
@@ -139,4 +149,5 @@ jobs:
       addons: ${{ inputs.addons }}
       copy_from_base: ""
       port_flavor: oplus
-      title: "Port OxygenOS"
+      oplus_rom_name: ${{ inputs.rom_name }}
+      title: "Port ColorOS"

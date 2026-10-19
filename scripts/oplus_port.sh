@@ -339,6 +339,10 @@ oplus_patch() {
     rm -rf "${OPLUS_DIR:?}"
 }
 
+# OPLUS_ROM_NAME: auto (dari props: OxygenOS / ColorOS / realmeUI) atau nama tetap (mis. ColorOS)
 oplus_rom_identity() {
-    python3 "$SCRIPT_DIR/oplus_tool.py" identity "$P_FS"
+    local rid
+    rid=$(python3 "$SCRIPT_DIR/oplus_tool.py" identity "$P_FS")
+    if [[ -n ${OPLUS_ROM_NAME:-} && ${OPLUS_ROM_NAME,,} != auto ]]; then rid="$OPLUS_ROM_NAME ${rid#* }"; fi
+    echo "$rid"
 }

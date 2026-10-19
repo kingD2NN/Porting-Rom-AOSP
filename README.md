@@ -88,9 +88,9 @@ Workflow **Port MIUI 14 / HyperOS -> ingres** menjalankan toolkit [toraidl/hyper
 
 Donor GSI (satu `system.img`) tidak didukung di sini, flash GSI dengan cara biasa saja.
 
-## Port OxygenOS / ColorOS / realme UI (OPlus)
+## Port ColorOS (OPlus) khusus ingres + LineageOS 23.2
 
-Workflow **Port OxygenOS -> ingres** (`port-oxygenos-ingres.yml`) memanggil workflow AOSP dengan mode OPlus (`PORT_FLAVOR=oplus`, `scripts/oplus_port.sh`). Donor OTA OPlus juga dikenali otomatis di workflow AOSP (`PORT_FLAVOR=auto`: payload punya partisi `my_*`). **Eksperimental: belum ada hasil yang dites boot di ingres.**
+Workflow **Port ColorOS -> ingres** (`port-coloros-ingres.yml`) memanggil workflow AOSP dengan mode OPlus (`PORT_FLAVOR=oplus`, `scripts/oplus_port.sh`), base LineageOS 23.2 ingres. Donor: ColorOS 16/17 (OTA full OPPO/OnePlus/realme, atau ColorOS hasil port HP lain seperti ColorOS 17 marble); OxygenOS/realme UI juga bisa dengan mesin yang sama. Nama ROM di zip default `ColorOS` (input `rom_name`, `auto` = dari props). Dari ROM hasil port hanya system/system_ext/product/`my_*` yang dipakai: kernel port marble yang "berisi driver OPlus" dibuat untuk hardware marble, di ingres tetap kernel D2N + modul vendor LineageOS. Donor OTA OPlus juga dikenali otomatis di workflow AOSP (`PORT_FLAVOR=auto`: payload punya partisi `my_*`). **Eksperimental: belum ada hasil yang dites boot di ingres.**
 
 | | |
 |---|---|
@@ -259,7 +259,7 @@ scripts/oplus_port.sh                    mode donor OxygenOS/ColorOS/realme UI: 
 scripts/sepol_compat.py                  buang permission/class SELinux vendor yang belum dikenal system donor (mis. nlmsg)
 scripts/sepol_bridge.py                  jembatan sepolicy: mapping/type/aturan/contexts public system_ext base untuk donor beda basis
 scripts/oplus_tool.py                    helper OPlus: merge-config, filter-props, odm-props, merge-ids, identity, label-check
-.github/workflows/port-oxygenos-ingres.yml port OxygenOS (memanggil port-aosp-ingres.yml, base HyperOS 2 stock)
+.github/workflows/port-coloros-ingres.yml port ColorOS khusus ingres (memanggil port-aosp-ingres.yml, base LineageOS 23.2)
 debloat_oplus.txt                        debloat port OPlus
 scripts/addons.sh                        addon MIUI Camera, Dolby, touch rate, cast layar (WFD), Hey Google (stage, cek versi Android & dependensi, pasang, rollback)
 scripts/addon_tool.py                    helper addon: CIL template -> policy vendor, label SELinux, audio_effects.xml, allowlist
