@@ -208,7 +208,8 @@ def merge_ids(base, donor):
 # ------------------------------------------------------------------ identity
 def identity(root):
     props = {}
-    for f in sorted(glob.glob(os.path.join(root, "system", "my_*", "build.prop"))) + \
+    for f in sorted(glob.glob(os.path.join(root, "system", "my_*", "build.prop")) +
+                    glob.glob(os.path.join(root, "system", "system", "my_*", "build.prop"))) + \
             [os.path.join(root, "product", "etc", "build.prop"), os.path.join(root, "system", "system", "build.prop")]:
         for k, v in read_props(f).items():
             props.setdefault(k, v)
@@ -234,7 +235,7 @@ def label_check(root):
     used = {}
     for line in open(fc, encoding="utf-8", errors="surrogateescape"):
         parts = line.split()
-        if len(parts) < 2 or not parts[0].startswith("/system/my_"):
+        if len(parts) < 2 or not parts[0].startswith(("/system/my_", "/system/system/my_")):
             continue
         ctx = parts[-1].split(":")
         if len(ctx) >= 3:

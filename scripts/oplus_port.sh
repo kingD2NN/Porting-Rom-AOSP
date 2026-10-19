@@ -36,6 +36,9 @@ OPLUS_DROP_PROP_RE=${OPLUS_DROP_PROP_RE:-'^ro\.sf\.lcd_density$|^ro\.density\.sc
 # props odm donor yang menyangkut hardware donor tidak diambil
 OPLUS_ODM_SKIP_RE=${OPLUS_ODM_SKIP_RE:-'display|camera|screen|lcd|panel|finger|charg|battery|audio|sensor|vibrat|haptic|nfc|aod|hbm|refresh|density|resolution|touch|wlan|wifi|bluetooth|modem|radio|gpu|cpu|thermal|power|sku|hardware'}
 OPLUS_PRESENT=""                              # my_* yang ada di donor (diisi oplus_detect)
+OPLUS_MERGED=false                            # donor = ROM OPlus yang sudah di-port (my_* sudah di image system)
+OPLUS_HOST=""                                 # folder (di hasil ekstrak) tempat my_* berada
+OPLUS_RT=""                                   # awalan path my_* saat jalan: "" (/my_*) atau /system
 OPLUS_DIR=""                                  # odm & vendor donor (ekstrak sebagian)
 
 # want payload donor: kalau payload punya my_manifest/my_product, ikut ambil my_* + odm/vendor donor
@@ -62,11 +65,26 @@ oplus_detect() {
         fi
         PORT_FLAVOR=oplus
         ok "donor OxygenOS/ColorOS (OPlus): partisi $OPLUS_PRESENT -> digabung ke /system"
-    elif [[ $PORT_FLAVOR == oplus ]]; then
-        die "PORT_FLAVOR=oplus tapi ROM donor tidak punya partisi my_* (bukan OTA OxygenOS/ColorOS). Pakai OTA full OnePlus/OPPO/realme (.zip payload.bin)"
-    else
-        PORT_FLAVOR=aosp
     fi
+    # tanpa image my_*: bisa ROM OPlus yang sudah di-port ke HP lain (my_* sudah digabung ke image
+    # system) -> diputuskan oplus_extract setelah system diekstrak
+}
+
+# donor ROM OPlus hasil port ke HP lain (mis. OxygenOS marble): my_* sudah folder di image system
+oplus_find_merged() {
+    local h p found=""
+    for h in "$P_FS/system" "$P_FS/system/system"; do
+        found=""
+        for p in $OPLUS_MY_PARTS; do
+            if [[ -d $h/$p && ! -L $h/$p && -f $h/$p/build.prop ]]; then found+="$p "; fi
+        done
+        if [[ -n $found ]] && { in_list my_manifest "$found" || in_list my_product "$found"; }; then
+            OPLUS_HOST=$h; OPLUS_PRESENT=${found% }
+            if [[ $h == "$P_FS/system" ]]; then OPLUS_RT=""; else OPLUS_RT=/system; fi
+            return 0
+        fi
+    done
+    return 1
 }
 
 # ekstrak sebagian isi image: erofs (extract.erofs -X) / ext4 (debugfs rdump) -> out/<nama>/<path>
@@ -92,9 +110,28 @@ oplus_extract_paths() { # img out path...
 
 oplus_extract() {
     local p
+    if [[ -z $OPLUS_PRESENT && $PORT_FLAVOR != aosp ]]; then
+        if oplus_find_merged; then
+            PORT_FLAVOR=oplus; OPLUS_MERGED=true
+            ok "donor OxygenOS/ColorOS yang sudah di-port (my_* sudah di image system, ${OPLUS_RT:-/}my_*: $OPLUS_PRESENT) -> dipakai apa adanya, disesuaikan ke ingres"
+        elif [[ $PORT_FLAVOR == oplus ]]; then
+            die "PORT_FLAVOR=oplus tapi ROM donor tidak punya partisi my_* maupun folder /my_* di system (bukan OxygenOS/ColorOS). Pakai OTA full OnePlus/OPPO/realme atau ROM OxygenOS hasil port"
+        else
+            PORT_FLAVOR=aosp
+        fi
+    fi
     [[ $PORT_FLAVOR == oplus ]] || return 0
-    for p in $OPLUS_PRESENT; do
-        log "ekstrak port $p (OPlus)"; extract_img "$P_IMG/$p.img" "$P_FS"; rm -f "$P_IMG/$p.img"
+    if ! is_true "$OPLUS_MERGED"; then
+        OPLUS_HOST="$P_FS/system"; OPLUS_RT=""
+        for p in $OPLUS_PRESENT; do
+            log "ekstrak port $p (OPlus)"; extract_img "$P_IMG/$p.img" "$P_FS"; rm -f "$P_IMG/$p.img"
+        done
+    fi
+    for p in "$P_IMG"/*.img; do
+        [[ -f $p ]] || continue
+        case $(basename "$p" .img) in system|system_ext|product|odm|vendor|vendor_dlkm|odm_dlkm|system_dlkm|my_*) ;;
+            *) warn "OPlus: donor punya partisi tambahan $(basename "$p") (khas porter / device donor) -> tidak ikut di-port" ;;
+        esac
     done
     OPLUS_DIR="$WORK/port/oplus"
     rm -rf "$OPLUS_DIR"; mkdir -p "$OPLUS_DIR"
@@ -102,7 +139,7 @@ oplus_extract() {
         oplus_extract_paths "$P_IMG/odm.img" "$OPLUS_DIR" build.prop etc/build.prop etc/permissions
         rm -f "$P_IMG/odm.img"
     else
-        warn "OPlus: odm donor tidak ada di payload, props & flag fitur OPlus dari odm tidak diambil"
+        warn "OPlus: odm donor tidak ada di ROM donor, props & flag fitur OPlus dari odm tidak diambil"
     fi
     if [[ -f $P_IMG/vendor.img ]]; then
         oplus_extract_paths "$P_IMG/vendor.img" "$OPLUS_DIR" etc/passwd etc/group
@@ -117,6 +154,7 @@ oplus_merge_my() {
     [[ $PORT_FLAVOR == oplus ]] || return 0
     [[ -d $root/system ]] || die "OPlus: system donor belum diekstrak, my_* tidak bisa digabung"
     for p in $OPLUS_PRESENT; do
+        is_true "$OPLUS_MERGED" && break
         [[ -d $P_FS/$p ]] || { warn "OPlus: $p tidak terekstrak, dilewati"; continue; }
         rm -rf "${root:?}/$p"            # titik mount kosong / symlink ke /mnt/vendor/my_*
         mv "$P_FS/$p" "$root/$p"
@@ -125,7 +163,9 @@ oplus_merge_my() {
         rm -f "$P_FS/config/${p}_"*
         log "  $res"
     done
-    ok "OPlus: $(wc -w <<< "$OPLUS_PRESENT") partisi my_* jadi bagian image system (ukuran system $(du -sh "$root" | cut -f1))"
+    if ! is_true "$OPLUS_MERGED"; then
+        ok "OPlus: $(wc -w <<< "$OPLUS_PRESENT") partisi my_* jadi bagian image system (ukuran system $(du -sh "$root" | cut -f1))"
+    fi
     # label file my_* harus dikenal sepolicy system/system_ext/product donor
     res=$(python3 "$SCRIPT_DIR/oplus_tool.py" label-check "$P_FS" 2>/dev/null || echo "RESULT ?")
     case $(sed -n 's/^RESULT //p' <<< "$res") in
@@ -147,9 +187,9 @@ oplus_density() {
 
 # props: import my_* dari odm, buang props hardware/panel donor, identitas & spesifikasi ingres
 oplus_props() {
-    local sysroot="$P_FS/system" odm_prop="$B_FS/odm/etc/build.prop" p f imports="" tail="" files=() base_files=()
+    local sysroot="$OPLUS_HOST" odm_prop="$B_FS/odm/etc/build.prop" p f imports="" tail="" files=() base_files=()
     local pdir="$sysroot/my_product/etc" res
-    [[ -d $sysroot/my_product ]] || pdir="$sysroot/system/etc"
+    [[ -d $sysroot/my_product ]] || pdir="$P_FS/system/system/etc"
     mkdir -p "$pdir"
     for f in "$B_FS/vendor/build.prop" "$B_FS/vendor/default.prop" "$B_FS/odm/build.prop" "$B_FS"/odm/etc/*build.prop; do
         [[ -f $f ]] && base_files+=("$f")
@@ -200,16 +240,16 @@ oplus_props() {
     local n_imp=0
     while IFS= read -r -d '' f; do
         grep -qE '^[[:space:]]*import[[:space:]]+/mnt/vendor/my_' "$f" || continue
-        sed -i -E 's#^([[:space:]]*import[[:space:]]+)/mnt/vendor/(my_)#\1/\2#' "$f"; n_imp=$((n_imp + 1))
-    done < <(find "$sysroot"/my_* "$sysroot/system/build.prop" "$P_FS/system_ext/etc" "$P_FS/product/etc" \
+        sed -i -E "s#^([[:space:]]*import[[:space:]]+)/mnt/vendor/(my_)#\\1${OPLUS_RT}/\\2#" "$f"; n_imp=$((n_imp + 1))
+    done < <(find "$sysroot"/my_* "$P_FS/system/system/build.prop" "$P_FS/system_ext/etc" "$P_FS/product/etc" \
                 -maxdepth 3 -type f \( -name '*.prop' -o -name 'build.prop' \) -print0 2>/dev/null)
     if [[ $n_imp -gt 0 ]]; then log "  $n_imp file props: import /mnt/vendor/my_* -> /my_*"; fi
     # import dari /odm/etc/build.prop: my_* + props odm OPlus DI AWAL (baris odm Xiaomi menimpanya),
     # spesifikasi ingres DI AKHIR. Context file yang di-import = init (path bukan /vendor|/odm)
-    local rel_p="/${pdir#"$sysroot"/}"
+    local rel_p="/${pdir#"$P_FS"/system/}"
     for p in $OPLUS_PROP_ORDER; do
         in_list "$p" "$OPLUS_PRESENT" || continue
-        [[ -f $sysroot/$p/build.prop ]] && imports+="import /$p/build.prop"$'\n'
+        [[ -f $sysroot/$p/build.prop ]] && imports+="import $OPLUS_RT/$p/build.prop"$'\n'
     done
     [[ -f $pdir/port_oplus_odm.prop ]] && imports+="import $rel_p/port_oplus_odm.prop"$'\n'
     tail="import $rel_p/port_ingres.prop"
@@ -222,7 +262,7 @@ oplus_props() {
         printf '# [port-oplus] spesifikasi ingres\n%s\n# [/port-oplus]\n' "$tail"
     } > "$odm_prop.new"
     mv -f "$odm_prop.new" "$odm_prop"
-    ok "OPlus props: $(grep -cE '^import /my_[a-z_]+/build\.prop$' "$odm_prop") build.prop my_* di-import dari odm/etc/build.prop; nama $OPLUS_MARKET_NAME, density ${dens:-donor}"
+    ok "OPlus props: $(grep -cE '^import (/system)?/my_[a-z_]+/build\.prop$' "$odm_prop") build.prop my_* di-import dari odm/etc/build.prop; nama $OPLUS_MARKET_NAME, density ${dens:-donor}"
 }
 
 # passwd/group vendor OPlus (AID layanan OPlus) digabung ke vendor Xiaomi
@@ -259,7 +299,7 @@ oplus_mnt_rc() {
         echo "on early-init"
         for p in $OPLUS_PRESENT; do
             echo "    mkdir /mnt/vendor/$p 0755 root root"
-            echo "    mount none /$p /mnt/vendor/$p bind"
+            echo "    mount none $OPLUS_RT/$p /mnt/vendor/$p bind"
         done
     } > "$rc"
     ok "OPlus: /mnt/vendor/my_* di-bind dari /my_* saat early-init (system/etc/init/port_oplus_my.rc)"
@@ -273,7 +313,7 @@ oplus_debloat() {
     while IFS= read -r line || [[ -n $line ]]; do
         line=${line%%#*}; line=${line//[[:space:]]/}
         [[ -n $line ]] || continue
-        case $line in my_*) base="$P_FS/system" ;; *) base="$P_FS" ;; esac
+        case $line in my_*) base="$OPLUS_HOST" ;; *) base="$P_FS" ;; esac
         # shellcheck disable=SC2231  # pola glob dari debloat_oplus.txt sengaja di-expand
         for d in $base/$line; do
             [[ -e $d ]] || continue

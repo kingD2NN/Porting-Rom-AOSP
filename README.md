@@ -98,6 +98,7 @@ Workflow **Port OxygenOS -> ingres** (`port-oxygenos-ingres.yml`) memanggil work
 | Donor | OTA full OnePlus / OPPO / realme (`.zip` payload.bin). Base LineageOS 23.2 = donor **Android 16+** (OxygenOS 16); base HyperOS 2 = Android 14+. Ideal SoC dekat: SM8450/SM8475 |
 | Fitur base | `base_extras` (default aktif, base LineageOS): **Aperture** jadi kamera (OPlus Camera dibuang), GameKeys (tombol bahu), Leds; `addons` sama dengan port AOSP (MIUI Camera, Dolby, touch rate, cast layar, Hey Google), masing-masing dicek dependensi & sepolicy, gagal = dibatalkan |
 | Dari donor | `system`, `system_ext`, `product` + partisi `my_*` (my_product, my_stock, my_heytap, my_manifest, my_bigball, my_region, my_carrier, my_engineering, my_company, my_preload) |
+| Donor hasil port | ROM OxygenOS/ColorOS yang **sudah di-port ke HP lain** (mis. zip recovery marble berisi `images/super.img`, `my_*` sudah jadi folder di image system) juga diterima: `my_*` dipakai apa adanya (dikenali di `/my_*` atau `/system/my_*`), lalu props/odm/passwd/debloat disesuaikan ke ingres. Partisi tambahan khas porter (mis. `neo_inject`) tidak ikut |
 | Kernel | `boot_img_url` (default D2N) dicek CRC vs modul vendor base: dengan base LineageOS 23.2 cocok (dites: 731 modul, 0 CRC beda); base HyperOS = kernel stock |
 | Filesystem | default semua EROFS lz4hc (ROM OPlus besar; super ingres 8,5 GB) |
 
