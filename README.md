@@ -152,7 +152,6 @@ apex_info.pb                    versi APEX di system donor
 META-INF/com/android/metadata   ota-type=AB, pre-device=ingres, post-timestamp, property-files
 META-INF/com/android/metadata.pb
 META-INF/com/android/otacert
-META-INF/port_info.txt          ringkasan build port
 ```
 
 - Dibuat oleh `scripts/make_ota.py` (tanpa delta_generator): format v2, op `REPLACE_XZ`/`REPLACE` per 2 MiB, group dinamis & ukuran sama dengan payload ROM base, ditandatangani test-key AOSP (recovery memeriksa ada tidaknya tanda tangan, bukan kuncinya). Setelah dibuat, zip dicek ulang (hash, offset, metadata).

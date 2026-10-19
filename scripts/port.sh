@@ -2080,9 +2080,11 @@ package_ota() { # "partisi logical" name port_ver port_name donor btype
     aosp_key testkey "$AOSP_TESTKEY_SHA256" || die "test-key AOSP untuk tanda tangan payload tidak bisa diunduh"
     openssl pkcs8 -inform DER -nocrypt -in "$kd/testkey.pk8" -out "$kd/testkey.pem" 2>/dev/null \
         || die "konversi testkey.pk8 gagal"
+    # ringkasan build hanya di log (tidak dimasukkan ke zip supaya isi zip rapi)
     ota_info_file "$WORK/port_info.txt" "$3" "$4" "$5" "$6"
+    log "info build:"; sed 's/^/    /' "$WORK/port_info.txt"
 
-    local extra=(--extra "META-INF/port_info.txt=$WORK/port_info.txt")
+    local extra=()
     if [[ -s $WORK/apex_info.pb ]]; then extra+=(--apex-info "$WORK/apex_info.pb"); fi
     python3 "$SCRIPT_DIR/make_ota.py" build --out "$OUT/$name.zip" \
         --key "$kd/testkey.pem" --cert "$kd/testkey.x509.pem" \
@@ -2397,7 +2399,9 @@ main() {
         echo "boot_img=${BOOT_USED:-${BOOT_IMG:-base}}"; echo "installer=$mode"
         echo "anti_ver=${ANTI_VER:-unknown}"; echo "build_date=$stamp"
         echo "firmware=$(cd "$pkg/images" && ls xbl.img >/dev/null 2>&1 && echo "${FIRMWARE_URL##*/}" || echo none)"
-    } > "$pkg/META-INF/port_info.txt"
+    } > "$WORK/port_info.txt"
+    # ringkasan build hanya di log (tidak dimasukkan ke zip supaya isi zip rapi)
+    log "info build:"; sed 's/^/    /' "$WORK/port_info.txt"
     ls -la "$pkg/images"
     (cd "$pkg" && zip -q -r -"$ZIP_LEVEL" -n .zst "$OUT/$name.zip" .)
     rm -rf "$pkg"
