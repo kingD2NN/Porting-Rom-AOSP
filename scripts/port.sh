@@ -25,6 +25,7 @@ DISABLE_ENCRYPTION=${DISABLE_ENCRYPTION:-true}
 RW_MOUNT=${RW_MOUNT:-true}
 DISABLE_AVB=${DISABLE_AVB:-true}
 DEBUG_ADB=${DEBUG_ADB:-false}
+SEPOL_BRIDGE=${SEPOL_BRIDGE:-true}         # type public system_ext/product base yang dipakai vendor tapi tidak ada di donor -> dijembatani
 RELEASE_KEYS=${RELEASE_KEYS:-true}         # samarkan build donor userdebug/test-keys jadi user/release-keys (bank, Play Integrity basic)
 SUPER_SIZE=${SUPER_SIZE:-auto}
 BASE_TYPE=${BASE_TYPE:-auto}                # auto | aosp (ROM AOSP ingres) | hyperos (stock MIUI/HyperOS ingres)
@@ -2040,7 +2041,7 @@ main() {
     BASE_KIND=$btype
     log "tipe ROM base: $btype"
     # system_ext base: sumber RRO khas device (base AOSP) / COPY_FROM_BASE system_ext/...
-    if [[ -f $B_IMG/system_ext.img ]] && { [[ $btype == aosp ]] || [[ " $COPY_FROM_BASE" == *" system_ext/"* ]]; }; then
+    if [[ -f $B_IMG/system_ext.img ]] && { [[ $btype == aosp ]] || is_true "$SEPOL_BRIDGE" || [[ " $COPY_FROM_BASE" == *" system_ext/"* ]]; }; then
         log "ekstrak base system_ext"; extract_img "$B_IMG/system_ext.img" "$B_FS"
     fi
     rm -f "$B_IMG/vendor.img" "$B_IMG/odm.img"   # dibangun ulang
@@ -2110,6 +2111,7 @@ main() {
     oplus_patch
     props_effective
     spoof_release_keys
+    sepol_bridge
     if is_true "$OVERLAY_FIX"; then fix_overlays "$donor"; fi
     report_app_sizes
     patch_port_resources "$btype" "$base_dev"

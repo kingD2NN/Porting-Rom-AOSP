@@ -587,6 +587,53 @@ spoof_release_keys() {
     fi
 }
 
+# ------------------------------------------------------------------ jembatan sepolicy
+# Vendor merujuk type public platform lewat atribut ber-versi (X_<ver>) yang diisi file mapping
+# system/system_ext/product. Donor beda basis dengan base (OxygenOS / AOSP murni di atas vendor
+# LineageOS atau HyperOS) tidak punya mapping untuk type public system_ext base (QTI telephony,
+# display, WFD, props vendor.*): compile lolos tapi aturan vendor tidak berlaku -> layanan/HAL
+# vendor ditolak SELinux saat jalan. Mapping, deklarasi type, aturan & contexts diambil dari
+# system_ext/product base (scripts/sepol_bridge.py), ditandai PORT_BRIDGE_TAG.
+PORT_BRIDGE_TAG="; [port-bridge]"
+sepol_bridge() {
+    local ver vs="$B_FS/vendor/etc/selinux" sys="$P_FS/system/system/etc/selinux" d f n res
+    local dcil=() hcil=() ucil=() bcil=() bmap=() ctx=() out="$WORK/bridge" nt nr nc
+    is_true "$SEPOL_BRIDGE" || return 0
+    ver=$(tr -d '[:space:]' < "$vs/plat_sepolicy_vers.txt" 2>/dev/null || true)
+    [[ -n $ver && -f $sys/plat_sepolicy.cil ]] || return 0
+    dcil+=("$sys/plat_sepolicy.cil")
+    for f in "$sys/mapping/$ver.cil" "$sys/mapping/$ver.compat.cil"; do [[ -f $f ]] && dcil+=("$f"); done
+    for n in system_ext product; do
+        d="$P_FS/$n/etc/selinux"
+        for f in "$d/${n}_sepolicy.cil" "$d/mapping/$ver.cil" "$d/mapping/$ver.compat.cil"; do [[ -f $f ]] && dcil+=("$f"); done
+        d="$B_FS/$n/etc/selinux"
+        [[ -f $d/${n}_sepolicy.cil ]] && bcil+=("$d/${n}_sepolicy.cil")
+        [[ -f $d/mapping/$ver.cil ]] && bmap+=("$d/mapping/$ver.cil")
+        for f in service hwservice property; do
+            [[ -f $d/${n}_${f}_contexts ]] && ctx+=("$d/${n}_${f}_contexts=$P_FS/$n/etc/selinux/${n}_${f}_contexts")
+        done
+    done
+    if [[ ${#bmap[@]} -eq 0 ]]; then log "sepolicy bridge: system_ext/product base tidak diekstrak / tanpa mapping $ver, dilewati"; return 0; fi
+    for f in "$vs/vendor_sepolicy.cil" "$vs/plat_pub_versioned.cil" "$B_FS/odm/etc/selinux/odm_sepolicy.cil"; do
+        [[ -f $f ]] && hcil+=("$f")
+    done
+    for f in "$vs/vendor_sepolicy.cil" "$B_FS/odm/etc/selinux/odm_sepolicy.cil"; do [[ -f $f ]] && ucil+=("$f"); done
+    mkdir -p "$out" "$P_FS/system_ext/etc/selinux/mapping"
+    res=$(python3 "$SCRIPT_DIR/sepol_bridge.py" --ver "$ver" --donor "${dcil[@]}" --have "${hcil[@]}" --use "${ucil[@]}" \
+          --base "${bcil[@]}" --base-map "${bmap[@]}" --tag "$PORT_BRIDGE_TAG" \
+          --out-cil "$out/bridge.cil" --out-map "$out/bridge_map.cil" --ctx "${ctx[@]}") \
+        || { warn "sepolicy bridge: gagal dijalankan, dilewati"; return 0; }
+    read -r n nt nr nc < <(sed -n 's/^RESULT //p' <<< "$res")
+    if [[ ${n:-0} -eq 0 ]]; then
+        ok "sepolicy bridge: semua type public base yang dipakai vendor sudah dipetakan sepolicy donor"
+        return 0
+    fi
+    cat "$out/bridge.cil" >> "$P_FS/system_ext/etc/selinux/system_ext_sepolicy.cil"
+    cat "$out/bridge_map.cil" >> "$P_FS/system_ext/etc/selinux/mapping/$ver.cil"
+    ok "sepolicy bridge: $n atribut vendor $ver dipetakan ke type system_ext/product base ($nt type baru, $nr aturan, $nc baris contexts) -> layanan/HAL vendor tidak ditolak SELinux"
+    grep '^CTX ' <<< "$res" | sed "s|^CTX $P_FS/|    contexts |" || true
+}
+
 # ------------------------------------------------------------------ cek tambahan
 abi_check() {
     local v32 s32 res n
@@ -969,6 +1016,19 @@ sepolicy_compile_check() {
         sepol_try
         if [[ $rc -eq 0 ]]; then
             warn "sepolicy: izin HAL untuk app dari base (GameKeys/Leds) bikin compile gagal -> dibuang; sepolicy kembali aman, fitur itu tidak berfungsi"
+        fi
+    fi
+    # baris jembatan sepolicy bikin compile gagal -> buang (compile tanpa jembatan = tetap aman)
+    if [[ $rc -ne 0 ]] && grep -qF "$PORT_BRIDGE_TAG" "$P_FS/system_ext/etc/selinux/system_ext_sepolicy.cil" 2>/dev/null; then
+        local bf
+        for bf in "$P_FS/system_ext/etc/selinux/system_ext_sepolicy.cil" "$P_FS/system_ext/etc/selinux/mapping/$ver.cil"; do
+            [[ -f $bf ]] || continue
+            grep -vF "$PORT_BRIDGE_TAG" "$bf" > "$WORK/bf.tmp" || true
+            cat "$WORK/bf.tmp" > "$bf"; rm -f "$WORK/bf.tmp"
+        done
+        sepol_try
+        if [[ $rc -eq 0 ]]; then
+            warn "sepolicy: jembatan sepolicy (type public base) bikin compile gagal -> dibuang; sepolicy kembali aman, sebagian layanan vendor bisa ditolak SELinux"
         fi
     fi
     if [[ ${#skipped[@]} -gt 0 ]]; then

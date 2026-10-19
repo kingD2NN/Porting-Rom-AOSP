@@ -94,10 +94,11 @@ Workflow **Port OxygenOS -> ingres** (`port-oxygenos-ingres.yml`) memanggil work
 
 | | |
 |---|---|
-| Base (default) | HyperOS 2 stock ingres `OS2.0.5.0.ULJCNXM` (Android 14): firmware, boot, vendor, odm, vendor_dlkm, mi_ext tetap Xiaomi |
-| Donor | OTA full OnePlus / OPPO / realme (`.zip` payload.bin) Android 14+ (versi donor >= vendor base). Ideal SoC dekat: SM8450/SM8475 (OnePlus 10 Pro, 10T, 11R, Ace Pro) |
+| Base (default) | **LineageOS 23.2 ingres** (Android 16, [Ingres-Centre release](https://github.com/Ingres-Centre/LineageOS-Releases/releases/tag/LineageOS-20260209-LAST)): firmware, boot, vendor, odm, vendor_dlkm dari base, jadi modul vendor cocok dengan kernel D2N `5.10.271-gki-MIX`. Alternatif: HyperOS 2 stock ingres `OS2.0.5.0.ULJCNXM` (Android 14) untuk donor OxygenOS 15 |
+| Donor | OTA full OnePlus / OPPO / realme (`.zip` payload.bin). Base LineageOS 23.2 = donor **Android 16+** (OxygenOS 16); base HyperOS 2 = Android 14+. Ideal SoC dekat: SM8450/SM8475 |
+| Fitur base | `base_extras` (default aktif, base LineageOS): **Aperture** jadi kamera (OPlus Camera dibuang), GameKeys (tombol bahu), Leds; `addons` sama dengan port AOSP (MIUI Camera, Dolby, touch rate, cast layar, Hey Google), masing-masing dicek dependensi & sepolicy, gagal = dibatalkan |
 | Dari donor | `system`, `system_ext`, `product` + partisi `my_*` (my_product, my_stock, my_heytap, my_manifest, my_bigball, my_region, my_carrier, my_engineering, my_company, my_preload) |
-| Kernel | `boot_img_url` (default D2N) dicek CRC vs modul vendor base; tidak cocok = kernel stock HyperOS |
+| Kernel | `boot_img_url` (default D2N) dicek CRC vs modul vendor base: dengan base LineageOS 23.2 cocok (dites: 731 modul, 0 CRC beda); base HyperOS = kernel stock |
 | Filesystem | default semua EROFS lz4hc (ROM OPlus besar; super ingres 8,5 GB) |
 
 Yang dilakukan (port ColorOS/OxygenOS ke HP Xiaomi lain memakai susunan yang sama: vendor Xiaomi + framework OPlus):
@@ -105,13 +106,14 @@ Yang dilakukan (port ColorOS/OxygenOS ke HP Xiaomi lain memakai susunan yang sam
 - **`my_*` digabung ke root image system** sebagai folder `/my_*` (di HP OnePlus: partisi sendiri, di-mount first-stage ke `/mnt/vendor/my_*` lalu di-bind ke `/my_*` oleh fstab vendor OPlus yang tidak ada di vendor Xiaomi). Label SELinux asli tiap file dipertahankan (config extract digabung, `scripts/oplus_tool.py merge-config`) dan dicek terhadap sepolicy donor (`label-check`). `/mnt/vendor/my_*` dibuat lagi saat early-init (bind dari `/my_*`, `system/etc/init/port_oplus_my.rc`).
 - **Props**: init AOSP tidak memuat `/my_*/build.prop`, jadi di-import dari `/odm/etc/build.prop` (sebelum baris odm Xiaomi; file yang di-import di luar `/odm` dimuat dengan context init). Import ke `/mnt/vendor/my_*` diarahkan ke `/my_*` (props dimuat sebelum early-init). Key `my_*` yang juga diisi vendor/odm base, serta props panel/resolusi donor (`ro.sf.lcd_density`, `ro.oplus.density.*`, `ro.oplus.resolution.*`, `screenhole`, `first_api_level`, `ro.zygote`) dinonaktifkan (`#[port]`), jadi props hardware Xiaomi tetap berlaku.
 - **odm donor** (diambil sebagian): props OPlus non-hardware (`ro.separate.soft`, `ro.build.device_family`, `*oplus*` selain display/kamera/baterai/sensor/...) -> `/my_product/etc/port_oplus_odm.prop`; flag fitur `odm/etc/permissions/*oplus*.xml` yang belum ada di odm base. HAL `vendor.oplus.*` donor tidak disalin (butuh domain sepolicy vendor OPlus).
+- **Jembatan sepolicy** (`scripts/sepol_bridge.py`, juga aktif untuk donor AOSP apa pun, `SEPOL_BRIDGE=true`): vendor merujuk type public platform lewat atribut ber-versi (`X_202504`) yang isinya diatur file mapping system_ext/product. System_ext OxygenOS tidak punya mapping untuk type public system_ext base (QTI telephony, display, WFD, props `vendor.*`), sehingga aturan vendor itu kosong dan layanan vendor ditolak SELinux saat jalan. Mapping, deklarasi type, aturan dan baris service/hwservice/property contexts diambil dari system_ext/product base. Dites dengan policy LineageOS 23.2 ingres: system_ext non-Lineage -> 57 atribut dipetakan, 477 aturan, compile secilc lolos; donor berbasis Lineage -> tidak ada yang ditambahkan. Kalau baris jembatan bikin compile gagal, dibuang otomatis.
 - **passwd/group** vendor OPlus digabung ke vendor Xiaomi (hanya nama & id yang belum dipakai).
 - **Tentang ponsel**: `ro.vendor.oplus.market.name` = POCO F4 GT, CPU, kamera 64MP + 8MP + 2MP / 20MP, layar 6,67", density & `first_api_level` dari base, nomor build + `UNOFFICIAL by KingD2N` (`/my_product/etc/port_ingres.prop`, di-import paling akhir). Brand/model/codename donor **dipertahankan** (banyak fitur OPlus dikunci ke brand/model).
 - **Debloat** `debloat_oplus.txt`: kamera OPlus (butuh HAL kamera OnePlus), overlay ikon sidik jari di layar (ingres: sidik jari samping), stub pihak ketiga, aplikasi Google opsional, layanan/toko khusus China. Pertahankan lewat input `debloat` dengan awalan `!` (mis. `!YouTube`); matikan semua dengan `oplus_debloat: false`.
 - Aplikasi OTA OPlus (`com.oplus.ota`) dibuang seperti updater ROM AOSP (OTA donor = brick).
 - Kalau hasil tidak muat di super, build **berhenti sebelum membuat zip** dengan jumlah MB yang kurang; tambah `debloat` dari daftar 25 aplikasi terbesar di log.
 
-Belum ditangani (kemungkinan bug setelah boot): aplikasi kamera (OPlus Camera dibuang; pasang GCam/kamera lain), refresh rate/fitur display OPlus, mode pengisian cepat & info baterai OPlus, sidik jari samping di UI OPlus, getar (OPlus memakai HAL richtap/lmvibrator), Dolby/efek audio OPlus. SELinux tetap enforcing (init user build tidak menerima permissive dari cmdline).
+Belum ditangani (kemungkinan bug setelah boot): aplikasi kamera di base HyperOS (base LineageOS: Aperture / MIUI Camera addon), refresh rate/fitur display OPlus, mode pengisian cepat & info baterai OPlus, sidik jari samping di UI OPlus, getar (OPlus memakai HAL richtap/lmvibrator), Dolby/efek audio OPlus. SELinux tetap enforcing (init user build tidak menerima permissive dari cmdline).
 
 ## Isi zip
 
@@ -252,6 +254,7 @@ scripts/fetch_rom.sh                     unduh ROM dengan nama file asli (Google
 scripts/port.sh                          proses port
 scripts/aosp_extras.sh                   overlay, updater, displayconfig, FCM, cek sepolicy/checkvintf/ABI/IMS
 scripts/oplus_port.sh                    mode donor OxygenOS/ColorOS/realme UI: gabung my_* ke /system, props, odm, passwd, debloat
+scripts/sepol_bridge.py                  jembatan sepolicy: mapping/type/aturan/contexts public system_ext base untuk donor beda basis
 scripts/oplus_tool.py                    helper OPlus: merge-config, filter-props, odm-props, merge-ids, identity, label-check
 .github/workflows/port-oxygenos-ingres.yml port OxygenOS (memanggil port-aosp-ingres.yml, base HyperOS 2 stock)
 debloat_oplus.txt                        debloat port OPlus

@@ -2,23 +2,28 @@ name: Port OxygenOS -> ingres
 
 # Port OxygenOS / ColorOS / realme UI (OPlus) ke ingres (POCO F4 GT / Redmi K50 Gaming).
 # Memanggil workflow "Port AOSP -> ingres" (port-aosp-ingres.yml) dengan mode OPlus:
-#   - base = ROM Xiaomi ingres (default HyperOS 2 stock OS2.0.5.0.ULJCNXM): firmware, boot,
-#     vendor, odm, vendor_dlkm, mi_ext tetap Xiaomi
-#   - donor = OTA full OnePlus/OPPO/realme (.zip payload.bin): system, system_ext, product +
-#     partisi my_* (digabung ke /system, lihat scripts/oplus_port.sh)
+#   - base = LineageOS 23.2 ingres (default, Android 16): firmware, boot, vendor, odm,
+#     vendor_dlkm tetap dari base -> modul vendor cocok dengan kernel D2N 5.10.271-gki-MIX,
+#     fitur LineageOS dari base (Aperture, GameKeys, LED) & addon AOSP ikut dipasang
+#   - donor = OTA full OxygenOS/ColorOS/realme UI Android 16+ (.zip payload.bin): system,
+#     system_ext, product + partisi my_* (digabung ke /system, lihat scripts/oplus_port.sh)
+#   - sepolicy: type public system_ext base yang dipakai vendor tapi tidak ada di OxygenOS
+#     dijembatani (scripts/sepol_bridge.py)
 #   - kernel D2N dicek otomatis vs modul vendor base (tidak cocok = kernel stock base)
+#   - donor OxygenOS 15 (Android 15): ganti base ke HyperOS 2 stock ingres (Android 14),
+#     https://cdnorg.d.miui.com/OS2.0.5.0.ULJCNXM/ingres-ota_full-OS2.0.5.0.ULJCNXM-user-14.0-f4c2771903.zip
 # Tidak ada concurrency di sini: workflow yang dipanggil sudah mengantre per workflow.
 
 on:
   workflow_dispatch:
     inputs:
       base_rom_url:
-        description: "URL ROM base ingres Xiaomi (default HyperOS 2 stock OS2.0.5.0.ULJCNXM, Android 14, OTA payload.bin). Versi Android base harus <= donor"
+        description: "URL ROM base ingres (default LineageOS 23.2 ingres, Android 16 -> kernel D2N cocok). Donor OxygenOS 15: pakai HyperOS 2 stock ingres (lihat komentar workflow). Versi Android base harus <= donor"
         required: true
-        default: "https://cdnorg.d.miui.com/OS2.0.5.0.ULJCNXM/ingres-ota_full-OS2.0.5.0.ULJCNXM-user-14.0-f4c2771903.zip"
+        default: "https://github.com/Ingres-Centre/LineageOS-Releases/releases/download/LineageOS-20260209-LAST/lineage-23.2-20260209-UNOFFICIAL-ingres.zip"
         type: string
       port_rom_url:
-        description: "URL OTA full OxygenOS/ColorOS/realme UI (.zip berisi payload.bin, ada partisi my_*). Ideal: SM8450/SM8475 (OnePlus 10 Pro, 10T, 11R, Ace Pro)"
+        description: "URL OTA full OxygenOS/ColorOS/realme UI Android 16+ (.zip payload.bin, ada partisi my_*). Ideal SoC dekat: SM8450/SM8475"
         required: true
         type: string
       package_type:
@@ -43,6 +48,16 @@ on:
         description: "Debloat tambahan: package / folder / path (mis. my_stock/app/Foo). Awalan ! = pertahankan dari debloat_oplus.txt"
         required: false
         default: ""
+        type: string
+      base_extras:
+        description: "Salin fitur LineageOS ingres dari base: Aperture (kamera, pengganti kamera OnePlus) + GameKeys (tombol bahu) + Leds (LED RGB). Hanya untuk base LineageOS"
+        required: false
+        default: true
+        type: boolean
+      addons:
+        description: "Addon (pisah spasi): miuicamera, dolby, touchrate, wfd, hotword. Dicek per versi Android & dependensi; gagal = dibatalkan otomatis. none = tanpa addon"
+        required: false
+        default: "miuicamera dolby touchrate wfd hotword"
         type: string
       oplus_debloat:
         description: "Pakai debloat_oplus.txt (kamera OPlus, overlay sidik jari di layar, stub pihak ketiga, app Google opsional)"
@@ -120,9 +135,8 @@ jobs:
       recovery_img_url: ${{ inputs.recovery_img_url }}
       release_repo: ${{ inputs.release_repo }}
       gdrive_upload: ${{ inputs.gdrive_upload }}
-      # khusus OPlus: tanpa fitur LineageOS dari base (base Xiaomi) & tanpa addon AOSP
-      base_extras: false
-      addons: ""
+      base_extras: ${{ inputs.base_extras }}
+      addons: ${{ inputs.addons }}
       copy_from_base: ""
       port_flavor: oplus
       title: "Port OxygenOS"
