@@ -107,12 +107,41 @@ on:
         required: false
         default: false
         type: boolean
+  # dipanggil workflow lain dengan default berbeda (mis. port-oxygenos-ingres.yml)
+  workflow_call:
+    inputs:
+      base_rom_url: { type: string, required: true }
+      port_rom_url: { type: string, required: true }
+      package_type: { type: string, required: false, default: ota }
+      super_size: { type: string, required: false, default: "9126805504" }
+      ext4_partitions: { type: string, required: false, default: "vendor odm system vendor_dlkm product system_ext" }
+      debloat: { type: string, required: false, default: "" }
+      copy_from_base: { type: string, required: false, default: "" }
+      base_extras: { type: boolean, required: false, default: true }
+      addons: { type: string, required: false, default: "miuicamera dolby touchrate wfd hotword" }
+      dolby_ui: { type: string, required: false, default: lunaris }
+      lunaris_apk_url: { type: string, required: false, default: "" }
+      maintainer: { type: string, required: false, default: "KingD2N" }
+      boot_img_url: { type: string, required: false, default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/TES/boot.img" }
+      disable_encryption: { type: boolean, required: false, default: true }
+      rw_mount: { type: boolean, required: false, default: true }
+      debug_adb: { type: boolean, required: false, default: false }
+      sepolicy_strict: { type: boolean, required: false, default: true }
+      recovery_img_url: { type: string, required: false, default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/ingres/TWRP_PROJECT_recovery_A16_A17_.img" }
+      release_repo: { type: string, required: false, default: "" }
+      gdrive_upload: { type: boolean, required: false, default: false }
+      port_flavor: { type: string, required: false, default: auto }
+      oplus_debloat: { type: boolean, required: false, default: true }
+      title: { type: string, required: false, default: "Port AOSP" }
+    secrets:
+      RELEASE_TOKEN: { required: false }
+      RCLONE_CONFIG: { required: false }
 
 permissions:
   contents: read
 
 concurrency:
-  group: port-aosp-ingres-${{ github.ref }}
+  group: port-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -293,6 +322,9 @@ jobs:
           DEBUG_ADB: ${{ inputs.debug_adb }}
           SEPOLICY_STRICT: ${{ inputs.sepolicy_strict }}
           RECOVERY_IMG: ${{ inputs.recovery_img_url }}
+          # auto = donor OTA OxygenOS/ColorOS (partisi my_*) dikenali otomatis
+          PORT_FLAVOR: ${{ inputs.port_flavor || 'auto' }}
+          OPLUS_DEBLOAT: ${{ inputs.oplus_debloat == false && 'false' || 'true' }}
         run: |
           set -euo pipefail
           sudo -E env "PATH=$PATH" bash scripts/port.sh
@@ -391,7 +423,7 @@ jobs:
           ADDONS_IN: ${{ inputs.addons }}
         run: |
           {
-            echo "## Port AOSP -> ${TARGET_DEVICE}"
+            echo "## ${{ inputs.title || 'Port AOSP' }} -> ${TARGET_DEVICE}"
             echo
             echo "| | |"
             echo "|---|---|"

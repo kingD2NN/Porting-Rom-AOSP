@@ -156,6 +156,9 @@ source "$SCRIPT_DIR/aosp_extras.sh"
 # addon opsional: MiuiCamera ingres, Dolby Atmos (ADDONS)
 # shellcheck source-path=SCRIPTDIR source=addons.sh
 source "$SCRIPT_DIR/addons.sh"
+# donor OxygenOS / ColorOS / realme UI (partisi my_* digabung ke /system)
+# shellcheck source-path=SCRIPTDIR source=oplus_port.sh
+source "$SCRIPT_DIR/oplus_port.sh"
 
 # ------------------------------------------------------------------ fetch
 # link "halaman web" (Google Drive /view, SourceForge, Pixeldrain /u/, MediaFire) diubah ke link
@@ -321,6 +324,7 @@ unpack_payload() { # payload dst pfx want
     python3 "$SCRIPT_DIR/lp_tool.py" payload "$pl" > "$WORK/${pfx}_payload.env"
     avail=$(env_get "$WORK/${pfx}_payload.env" PAYLOAD_PARTITIONS)
     log "[$pfx] isi payload: $avail"
+    want=$(oplus_payload_want "$pfx" "$avail" "$want")
     if [[ $want != all ]]; then
         for p in ${want//,/ }; do
             if in_list "$p" "$avail"; then list+="${list:+,}$p"; fi
@@ -842,6 +846,9 @@ patch_props() {
     for rel in "${PORT_PROP_FILES[@]}"; do
         f="$P_FS/$rel"
         [[ -f $f ]] || continue
+        # OPlus: brand/model/codename donor dipertahankan (fitur OPlus dikunci ke brand/model),
+        # nama di Tentang ponsel diatur oplus_props (ro.vendor.oplus.market.name)
+        [[ $PORT_FLAVOR != oplus ]] || continue
         log "props: $rel"
         if [[ -n $donor && $donor != "$base" ]]; then
             # codename donor -> ingres di props identitas device & ROM (ro.lineage.device, flavor, versi ROM)
@@ -1428,6 +1435,11 @@ fit_super() {
     done < <(printf '%s\n' "${cand[@]}" | sort -rn)
     EXT4_PARTITIONS=$new
     log "setelah fallback EROFS: $(( total / 1048576 )) MB / $(( SUPER_GMAX / 1048576 )) MB (masih EXT4: ${EXT4_PARTITIONS:-tidak ada})"
+    if [[ $total -gt $SUPER_GMAX ]]; then
+        # paket yang tetap dibuat akan ditolak update_engine/lpmake saat flash -> hentikan di sini
+        ls -la "$OUT_IMG_TMP" >&2
+        die "ROM port $(( total / 1048576 )) MB, partisi super ingres hanya $(( SUPER_GMAX / 1048576 )) MB (kurang $(( (total - SUPER_GMAX) / 1048576 + 1 )) MB). Tambah input debloat (lihat '25 aplikasi/folder terbesar' di log, mis. my_stock/app/Foo) lalu jalankan ulang"
+    fi
 }
 
 build_super() {
@@ -2012,6 +2024,7 @@ main() {
     for p in $PORT_PARTITIONS; do
         [[ -f $P_IMG/$p.img ]] || { warn "port tidak punya $p.img, pakai milik base"; continue; }
     done
+    oplus_detect
     ls -la "$P_IMG"; dfree
     group_end
 
@@ -2034,6 +2047,8 @@ main() {
         [[ -f $P_IMG/$p.img ]] || continue
         log "ekstrak port $p"; extract_img "$P_IMG/$p.img" "$P_FS"; rm -f "$P_IMG/$p.img"
     done
+    oplus_extract
+    oplus_merge_my
     dfree
     group_end
 
@@ -2049,8 +2064,13 @@ main() {
         warn "base vendor device=$base_dev, bukan $TARGET_DEVICE (ALLOW_OTHER_BASE=true)"
     fi
     donor=$(detect_donor)
-    rom_branding
-    rid=$(rom_identity); port_name=${rid%% *}; port_ver=${rid#* }
+    if [[ $PORT_FLAVOR == oplus ]]; then
+        rid=$(oplus_rom_identity)
+    else
+        rom_branding
+        rid=$(rom_identity)
+    fi
+    port_name=${rid%% *}; port_ver=${rid#* }
     log "donor=${donor:-?}  base=$base_dev ($btype)  ROM=$port_name  versi=$port_ver"
     [[ -n $donor ]] || warn "codename donor tidak terdeteksi -> RRO khas donor hanya dibuang lewat DEVICE_OVERLAY_GLOBS"
     if is_miui_tree "$P_FS"; then
@@ -2086,6 +2106,7 @@ main() {
     DEBLOAT_KEEP=$(debloat_keep)
     if is_true "$PROP_MERGE"; then merge_device_props; fi
     patch_props "$donor" "$base_dev"
+    oplus_patch
     props_effective
     if is_true "$OVERLAY_FIX"; then fix_overlays "$donor"; fi
     report_app_sizes

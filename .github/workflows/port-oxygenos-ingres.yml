@@ -1,0 +1,122 @@
+name: Port OxygenOS -> ingres
+
+# Port OxygenOS / ColorOS / realme UI (OPlus) ke ingres (POCO F4 GT / Redmi K50 Gaming).
+# Memanggil workflow "Port AOSP -> ingres" (port-aosp-ingres.yml) dengan mode OPlus:
+#   - base = ROM Xiaomi ingres (default HyperOS 2 stock OS2.0.5.0.ULJCNXM): firmware, boot,
+#     vendor, odm, vendor_dlkm, mi_ext tetap Xiaomi
+#   - donor = OTA full OnePlus/OPPO/realme (.zip payload.bin): system, system_ext, product +
+#     partisi my_* (digabung ke /system, lihat scripts/oplus_port.sh)
+#   - kernel D2N dicek otomatis vs modul vendor base (tidak cocok = kernel stock base)
+# Tidak ada concurrency di sini: workflow yang dipanggil sudah mengantre per workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_rom_url:
+        description: "URL ROM base ingres Xiaomi (default HyperOS 2 stock OS2.0.5.0.ULJCNXM, Android 14, OTA payload.bin). Versi Android base harus <= donor"
+        required: true
+        default: "https://cdnorg.d.miui.com/OS2.0.5.0.ULJCNXM/ingres-ota_full-OS2.0.5.0.ULJCNXM-user-14.0-f4c2771903.zip"
+        type: string
+      port_rom_url:
+        description: "URL OTA full OxygenOS/ColorOS/realme UI (.zip berisi payload.bin, ada partisi my_*). Ideal: SM8450/SM8475 (OnePlus 10 Pro, 10T, 11R, Ace Pro)"
+        required: true
+        type: string
+      package_type:
+        description: "ota = payload.bin (flash di recovery) | recovery = images + super.img.zst"
+        required: false
+        default: ota
+        type: choice
+        options:
+          - ota
+          - recovery
+      super_size:
+        description: "Ukuran partisi super (byte). ingres = 9126805504"
+        required: false
+        default: "9126805504"
+        type: string
+      ext4_partitions:
+        description: "Partisi EXT4 (sisanya EROFS lz4hc). Kosong = semua EROFS, paling hemat tempat (ROM OPlus besar)"
+        required: false
+        default: ""
+        type: string
+      debloat:
+        description: "Debloat tambahan: package / folder / path (mis. my_stock/app/Foo). Awalan ! = pertahankan dari debloat_oplus.txt"
+        required: false
+        default: ""
+        type: string
+      oplus_debloat:
+        description: "Pakai debloat_oplus.txt (kamera OPlus, overlay sidik jari di layar, stub pihak ketiga, app Google opsional)"
+        required: false
+        default: true
+        type: boolean
+      maintainer:
+        description: "Ditambahkan ke nomor build di Tentang ponsel (UNOFFICIAL by <maintainer>). Kosong = tidak diubah"
+        required: false
+        default: "KingD2N"
+        type: string
+      boot_img_url:
+        description: "URL boot.img kernel custom (default D2N 5.10.271-gki-MIX). Dicek vs modul vendor base: tidak cocok = kernel stock base. Kosong = kernel base"
+        required: false
+        default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/TES/boot.img"
+        type: string
+      disable_encryption:
+        description: "Matikan fileencryption/metadata_encryption di fstab"
+        required: false
+        default: true
+        type: boolean
+      debug_adb:
+        description: "ADB aktif sejak boot tanpa konfirmasi (hanya untuk logcat saat bootloop)"
+        required: false
+        default: false
+        type: boolean
+      sepolicy_strict:
+        description: "Build GAGAL kalau sepolicy gabungan (system OPlus + vendor Xiaomi) tidak bisa di-compile"
+        required: false
+        default: true
+        type: boolean
+      recovery_img_url:
+        description: "URL recovery.img custom (default TWRP D2N). Kosong = recovery HP tidak disentuh"
+        required: false
+        default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/ingres/TWRP_PROJECT_recovery_A16_A17_.img"
+        type: string
+      release_repo:
+        description: "owner/repo untuk GitHub Release (kosong = upload artifact)"
+        required: false
+        default: ""
+        type: string
+      gdrive_upload:
+        description: "Upload juga ke Google Drive (butuh secret RCLONE_CONFIG)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  port:
+    uses: ./.github/workflows/port-aosp-ingres.yml
+    secrets: inherit
+    with:
+      base_rom_url: ${{ inputs.base_rom_url }}
+      port_rom_url: ${{ inputs.port_rom_url }}
+      package_type: ${{ inputs.package_type }}
+      super_size: ${{ inputs.super_size }}
+      ext4_partitions: ${{ inputs.ext4_partitions }}
+      debloat: ${{ inputs.debloat }}
+      oplus_debloat: ${{ inputs.oplus_debloat }}
+      maintainer: ${{ inputs.maintainer }}
+      boot_img_url: ${{ inputs.boot_img_url }}
+      disable_encryption: ${{ inputs.disable_encryption }}
+      rw_mount: false
+      debug_adb: ${{ inputs.debug_adb }}
+      sepolicy_strict: ${{ inputs.sepolicy_strict }}
+      recovery_img_url: ${{ inputs.recovery_img_url }}
+      release_repo: ${{ inputs.release_repo }}
+      gdrive_upload: ${{ inputs.gdrive_upload }}
+      # khusus OPlus: tanpa fitur LineageOS dari base (base Xiaomi) & tanpa addon AOSP
+      base_extras: false
+      addons: ""
+      copy_from_base: ""
+      port_flavor: oplus
+      title: "Port OxygenOS"

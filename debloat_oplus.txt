@@ -1,0 +1,57 @@
+# Debloat port OxygenOS / ColorOS / realme UI -> ingres (dipakai kalau OPLUS_DEBLOAT=true)
+#
+# Satu pola glob per baris. Pola yang diawali my_ = folder /my_* (sudah digabung ke root system),
+# selain itu relatif ke partisi port (system_ext/..., product/..., system/system/...).
+# Pertahankan sesuatu dari daftar ini lewat input debloat dengan awalan "!" (mis. !YouTube).
+# Disusun dari port ColorOS/OxygenOS ke HP Xiaomi (vendor Xiaomi + framework OPlus).
+
+# kamera OPlus: dikalibrasi untuk HAL & sensor kamera OnePlus, tidak jalan di HAL kamera Xiaomi
+my_*/app/OplusCamera*
+my_*/priv-app/OplusCamera*
+
+# ikon/efek sidik jari di layar (ingres: sidik jari samping di tombol power)
+my_product/overlay/SystemUIFingerprintRes_*
+
+# stub/installer aplikasi pihak ketiga
+my_*/app/Facebook*
+my_*/priv-app/Facebook*
+my_*/del-app*/Facebook*
+my_*/del-app*/Instagram*
+my_*/del-app*/Netflix*
+my_*/del-app*/LinkedIn*
+my_*/del-app*/Spotify*
+my_*/del-app*/Amazon*
+my_*/del-app*/Booking*
+my_*/del-app*/Agoda*
+my_*/del-app*/TikTok*
+my_*/del-app*/Snapchat*
+my_*/del-app*/Shopee*
+my_*/del-app*/Lazada*
+my_*/app/YandexKeyboard*
+
+# aplikasi Google opsional (bisa dipasang lagi dari Play Store)
+my_*/del-app*/YTMusic*
+my_*/del-app*/Videos*
+my_*/del-app*/Drive*
+my_*/del-app*/GoogleOne*
+my_*/del-app*/GoogleFitbit*
+my_*/del-app*/GoogleHome*
+my_*/app/YouTube
+my_*/app/Maps
+my_*/app/Photos
+my_*/app/Meet
+my_*/app/Gmail2
+my_*/app/GoogleWallet
+my_*/app/GPay*
+
+# layanan OPlus khusus China / pembayaran / toko / aktivasi device donor
+my_stock/app/KeKePay
+my_stock/app/SecurePay
+my_stock/app/SoftsimRedteaRoaming
+my_stock/app/OplusPhoneActivation
+my_stock/del-app/FinShellPay
+my_stock/del-app/IDOppoStore
+my_stock/del-app/INOppoStore
+my_stock/del-app/KeKeUserCenterMember
+my_stock/priv-app/KeKeMarket
+my_stock/priv-app/KeKeUserCenter
