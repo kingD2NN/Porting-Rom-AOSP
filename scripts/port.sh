@@ -2119,6 +2119,7 @@ main() {
     apply_device_files
     remove_updater
     vintf_tool_check
+    sepol_vendor_compat
     sepolicy_compile_check
     rm -rf "${B_FS:?}/product" "$B_FS/config/product_"* "${B_FS:?}/system_ext" "$B_FS/config/system_ext_"*
     rm -f "$B_IMG/product.img"

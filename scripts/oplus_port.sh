@@ -127,10 +127,14 @@ oplus_extract() {
             log "ekstrak port $p (OPlus)"; extract_img "$P_IMG/$p.img" "$P_FS"; rm -f "$P_IMG/$p.img"
         done
     fi
-    for p in "$P_IMG"/*.img; do
-        [[ -f $p ]] || continue
-        case $(basename "$p" .img) in system|system_ext|product|odm|vendor|vendor_dlkm|odm_dlkm|system_dlkm|my_*) ;;
-            *) warn "OPlus: donor punya partisi tambahan $(basename "$p") (khas porter / device donor) -> tidak ikut di-port" ;;
+    # partisi logical tambahan di super donor (khas porter, mis. neo_inject); boot/dtbo/vbmeta
+    # donor memang tidak dipakai, tidak perlu dilaporkan
+    local lp=""
+    [[ -f $WORK/port_lp.env ]] && lp=$(env_get "$WORK/port_lp.env" LP_PARTITIONS)
+    for p in $lp; do
+        p=${p%_a}; p=${p%_b}
+        case $p in system|system_ext|product|odm|vendor|vendor_dlkm|odm_dlkm|system_dlkm|my_*) ;;
+            *) if [[ -f $P_IMG/$p.img ]]; then warn "OPlus: super donor punya partisi tambahan $p (khas porter / device donor) -> tidak ikut di-port"; fi ;;
         esac
     done
     OPLUS_DIR="$WORK/port/oplus"

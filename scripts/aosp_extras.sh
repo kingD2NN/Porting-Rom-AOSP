@@ -634,6 +634,29 @@ sepol_bridge() {
     grep '^CTX ' <<< "$res" | sed "s|^CTX $P_FS/|    contexts |" || true
 }
 
+# class & permission SELinux didefinisikan plat_sepolicy.cil system donor. Vendor lebih baru
+# (mis. LineageOS 23.2 QPR2: permission nlmsg di netlink_route_socket) di atas system donor yang
+# lebih lama (OxygenOS 16 awal) -> "Failed to resolve permission" -> init gagal compile sepolicy =
+# bootloop. Permission/class yang tidak dikenal platform donor dibuang dari aturan vendor/odm
+# (dan baris system_ext/product hasil jembatan). Kernel 5.10 juga tidak mengenal permission baru itu.
+sepol_vendor_compat() {
+    local sys="$P_FS/system/system/etc/selinux" files=() f res n
+    [[ -f $sys/plat_sepolicy.cil ]] || return 0
+    for f in "$B_FS/vendor/etc/selinux/vendor_sepolicy.cil" "$B_FS/odm/etc/selinux/odm_sepolicy.cil" \
+             "$P_FS/system_ext/etc/selinux/system_ext_sepolicy.cil" "$P_FS/product/etc/selinux/product_sepolicy.cil"; do
+        [[ -f $f ]] && files+=("$f")
+    done
+    res=$(python3 "$SCRIPT_DIR/sepol_compat.py" "$sys/plat_sepolicy.cil" "${files[@]}") \
+        || { warn "sepolicy compat: gagal dijalankan, dilewati"; return 0; }
+    n=$(sed -n 's/^RESULT //p' <<< "$res")
+    case $n in
+        0) ok "sepolicy compat: semua class/permission di policy vendor dikenal platform donor" ;;
+        "?"*) warn "sepolicy compat: class platform donor tidak terbaca, dilewati" ;;
+        *) ok "sepolicy compat: $n aturan vendor/odm memakai permission/class yang belum ada di system donor -> disesuaikan (mis. nlmsg)"
+           grep -v '^RESULT' <<< "$res" | sed "s|$WORK/||; s/^/    /" ;;
+    esac
+}
+
 # ------------------------------------------------------------------ cek tambahan
 abi_check() {
     local v32 s32 res n
