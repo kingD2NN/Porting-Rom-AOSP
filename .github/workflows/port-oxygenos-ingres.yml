@@ -69,6 +69,11 @@ on:
         required: false
         default: false
         type: boolean
+      release_keys:
+        description: "Samarkan build jadi user/release-keys + ro.debuggable=0 (aplikasi bank & Play Integrity basic di ROM tanpa root)"
+        required: false
+        default: true
+        type: boolean
       sepolicy_strict:
         description: "Build GAGAL kalau sepolicy gabungan (system OPlus + vendor Xiaomi) tidak bisa di-compile"
         required: false
@@ -110,6 +115,7 @@ jobs:
       disable_encryption: ${{ inputs.disable_encryption }}
       rw_mount: false
       debug_adb: ${{ inputs.debug_adb }}
+      release_keys: ${{ inputs.release_keys }}
       sepolicy_strict: ${{ inputs.sepolicy_strict }}
       recovery_img_url: ${{ inputs.recovery_img_url }}
       release_repo: ${{ inputs.release_repo }}

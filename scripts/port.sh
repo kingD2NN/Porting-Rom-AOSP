@@ -25,6 +25,7 @@ DISABLE_ENCRYPTION=${DISABLE_ENCRYPTION:-true}
 RW_MOUNT=${RW_MOUNT:-true}
 DISABLE_AVB=${DISABLE_AVB:-true}
 DEBUG_ADB=${DEBUG_ADB:-false}
+RELEASE_KEYS=${RELEASE_KEYS:-true}         # samarkan build donor userdebug/test-keys jadi user/release-keys (bank, Play Integrity basic)
 SUPER_SIZE=${SUPER_SIZE:-auto}
 BASE_TYPE=${BASE_TYPE:-auto}                # auto | aosp (ROM AOSP ingres) | hyperos (stock MIUI/HyperOS ingres)
 # yang diambil dari base ke partisi port:
@@ -2108,6 +2109,7 @@ main() {
     patch_props "$donor" "$base_dev"
     oplus_patch
     props_effective
+    spoof_release_keys
     if is_true "$OVERLAY_FIX"; then fix_overlays "$donor"; fi
     report_app_sizes
     patch_port_resources "$btype" "$base_dev"

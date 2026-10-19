@@ -87,6 +87,11 @@ on:
         required: false
         default: false
         type: boolean
+      release_keys:
+        description: "Samarkan build donor userdebug/test-keys jadi user/release-keys + ro.debuggable=0 (aplikasi bank & Play Integrity basic di ROM tanpa root)"
+        required: false
+        default: true
+        type: boolean
       sepolicy_strict:
         description: "Build GAGAL kalau sepolicy gabungan (system donor + vendor ingres) tidak bisa di-compile"
         required: false
@@ -126,6 +131,7 @@ on:
       disable_encryption: { type: boolean, required: false, default: true }
       rw_mount: { type: boolean, required: false, default: true }
       debug_adb: { type: boolean, required: false, default: false }
+      release_keys: { type: boolean, required: false, default: true }
       sepolicy_strict: { type: boolean, required: false, default: true }
       recovery_img_url: { type: string, required: false, default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/ingres/TWRP_PROJECT_recovery_A16_A17_.img" }
       release_repo: { type: string, required: false, default: "" }
@@ -325,6 +331,7 @@ jobs:
           # auto = donor OTA OxygenOS/ColorOS (partisi my_*) dikenali otomatis
           PORT_FLAVOR: ${{ inputs.port_flavor || 'auto' }}
           OPLUS_DEBLOAT: ${{ inputs.oplus_debloat == false && 'false' || 'true' }}
+          RELEASE_KEYS: ${{ inputs.release_keys == false && 'false' || 'true' }}
         run: |
           set -euo pipefail
           sudo -E env "PATH=$PATH" bash scripts/port.sh
@@ -418,6 +425,7 @@ jobs:
           DISABLE_ENCRYPTION: ${{ inputs.disable_encryption }}
           RW_MOUNT: ${{ inputs.rw_mount }}
           DEBUG_ADB: ${{ inputs.debug_adb }}
+          RELEASE_KEYS_IN: ${{ inputs.release_keys == false && 'false' || 'true' }}
           BOOT: ${{ steps.port.outputs.boot_used || inputs.boot_img_url }}
           PKG: ${{ inputs.package_type }}
           ADDONS_IN: ${{ inputs.addons }}
@@ -436,6 +444,7 @@ jobs:
             echo "| Encryption off | ${DISABLE_ENCRYPTION} |"
             echo "| RW | ${RW_MOUNT} |"
             echo "| Debug ADB | ${DEBUG_ADB} |"
+            echo "| user/release-keys | ${RELEASE_KEYS_IN} |"
             echo "| Paket | ${PKG:-ota} |"
             echo "| Addons | ${ADDONS_IN:-none} |"
             if [ -n "${GDRIVE_LINK:-}" ]; then echo "| Google Drive | ${GDRIVE_LINK} |"; fi

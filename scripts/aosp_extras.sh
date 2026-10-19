@@ -562,6 +562,31 @@ remove_updater() {
     if [[ $n -eq 0 ]]; then log "updater: tidak ada aplikasi OTA di ROM donor"; fi
 }
 
+# ------------------------------------------------------------------ release-keys
+# build donor userdebug/eng + test-keys/dev-keys ditolak aplikasi bank/e-wallet, pemeriksa root
+# sederhana dan Play Integrity (MEETS_BASIC_INTEGRITY). Semua build.prop port (system,
+# system_ext, product, /my_* OPlus) + vendor/odm base disamarkan jadi user/release-keys.
+spoof_release_keys() {
+    local files=() f res before after keep=()
+    is_true "$RELEASE_KEYS" || { log "release-keys: RELEASE_KEYS=false, jenis build donor apa adanya"; return 0; }
+    while IFS= read -r -d '' f; do files+=("$f"); done < <(
+        find "$P_FS" "$B_FS/vendor" "$B_FS/odm" -type f \( -name build.prop -o -name default.prop -o -name prop.default \) \
+            -print0 2>/dev/null)
+    [[ ${#files[@]} -gt 0 ]] || { warn "release-keys: tidak ada build.prop"; return 0; }
+    before=$(get_prop "$P_FS/system/system/build.prop" ro.build.fingerprint)
+    if is_true "$DEBUG_ADB"; then
+        keep=(--keep-debug)
+        warn "release-keys: DEBUG_ADB=true -> ro.debuggable/ro.adb.secure dibiarkan (aplikasi bank tetap bisa menolak)"
+    fi
+    res=$(python3 "$SCRIPT_DIR/release_keys.py" "${keep[@]}" "${files[@]}")
+    after=$(get_prop "$P_FS/system/system/build.prop" ro.build.fingerprint)
+    if [[ $(sed -n 's/^TOTAL //p' <<< "$res") == 0 ]]; then
+        ok "release-keys: build donor sudah user/release-keys (${after##*:})"
+    else
+        ok "release-keys: $(sed -n 's/^TOTAL //p' <<< "$res") prop diubah -> user/release-keys, debuggable=0 (${before##*:} -> ${after##*:})"
+    fi
+}
+
 # ------------------------------------------------------------------ cek tambahan
 abi_check() {
     local v32 s32 res n
