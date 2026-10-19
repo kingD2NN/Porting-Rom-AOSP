@@ -24,6 +24,9 @@
 (allow {APP} {vendor_camera_data_file} (dir (ioctl read write getattr lock append map open watch watch_reads search)))
 (allow {APP} {vendor_camera_data_file} (file (getattr open read)))
 (allow {APP} {app_data_file} (file (execute)))
+; app priv_app (MiuiCamera bertanda tangan testkey, donor kunci privat): data app berlabel
+; privapp_data_file, bukan app_data_file -> izin execute yang sama (library/model yang diekstrak ke data app)
+(allow {APP} {privapp_data_file} (file (execute)))
 (allow {APP} {vendor_camera_sensor_prop} (file (ioctl read getattr lock map open watch watch_reads)))
 (allow {APP} {vendor_display_prop} (file (ioctl read getattr lock map open watch watch_reads)))
 (allow {APP} {vendor_panel_info_prop} (file (ioctl read getattr lock map open watch watch_reads)))

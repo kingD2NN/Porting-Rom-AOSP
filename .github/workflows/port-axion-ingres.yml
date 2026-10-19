@@ -1,0 +1,155 @@
+name: Port AxionOS -> ingres
+
+# Port AxionOS / AxionAOSP dari device lain (mis. marble / POCO F5, Adreno 725) ke ingres
+# (POCO F4 GT / Redmi K50 Gaming, Adreno 730). Memanggil workflow "Port AOSP -> ingres"
+# (port-aosp-ingres.yml) dengan default khusus Axion:
+#   - addon gpudriver: driver GPU Adreno yang dibawa vendor ROM donor (AxionAOSP 2.9 marble:
+#     Adreno V@0863.1, Vulkan 1.3.295, driver @Joshaby) dipasang ke vendor ingres, menggantikan
+#     driver vendor base yang lebih lama. Hanya kalau libgsl driver itu mengenal Adreno 730, versinya
+#     lebih baru, dan semua dependensi + simbol library tersedia; selain itu otomatis dilewati
+#     (driver base tetap, ROM tetap jalan). Firmware GPU (a730_sqe.fw / gmu) tidak diganti.
+#   - addon miuicamera: MIUI Camera ingres (Gurinbone) menggantikan MIUI Camera bawaan donor
+#     (dikalibrasi untuk sensor marble). Library JNI kamera donor dicoret dari daftar publik,
+#     simbol JNI dicek terhadap framework Axion.
+# Tidak ada concurrency di sini: workflow yang dipanggil sudah mengantre per workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_rom_url:
+        description: "URL ROM base ingres: OTA AOSP ingres (.zip payload.bin, disarankan LineageOS 23.2 / AxionOS ingres Android 16)"
+        required: true
+        default: "https://drive.usercontent.google.com/download?id=1KqceWVUy_BYXGbJaGzduY30gwfehQE7N&export=download&confirm=t&uuid=4cba5f85-d71d-4250-9b72-7696a2d4cdba"
+      port_rom_url:
+        description: "URL OTA AxionOS donor (.zip berisi payload.bin, mis. AxionAOSP 2.9 marble). Vendor donor = sumber driver GPU"
+        required: true
+        type: string
+      addons:
+        description: "Addon (pisah spasi): gpudriver (Adreno dari vendor donor), miuicamera, dolby, touchrate, wfd, hotword. none = tanpa addon"
+        required: false
+        default: "gpudriver miuicamera dolby touchrate wfd hotword"
+        type: string
+      gpu_driver_url:
+        description: "Opsional: zip driver Adreno (modul Magisk/KSU/recovery berisi vendor/lib64/egl/...). Kosong = driver dari vendor ROM donor"
+        required: false
+        default: ""
+        type: string
+      gpu_renderengine:
+        description: "RenderEngine surfaceflinger setelah driver diganti. skiaglthreaded = GLES (aman dari bootloop Vulkan RenderEngine); skiavkthreaded = Vulkan; vendor = ikut base. Game tetap pakai Vulkan driver baru"
+        required: false
+        default: skiaglthreaded
+        type: choice
+        options:
+          - skiaglthreaded
+          - skiavkthreaded
+          - vendor
+      package_type:
+        description: "ota = payload.bin (flash di recovery) | recovery = images + super.img.zst"
+        required: false
+        default: ota
+        type: choice
+        options:
+          - ota
+          - recovery
+      super_size:
+        description: "Ukuran partisi super (byte). ingres = 9126805504"
+        required: false
+        default: "9126805504"
+        type: string
+      debloat:
+        description: "Debloat tambahan: package / folder / path, pisah spasi. Boleh kosong"
+        required: false
+        default: ""
+        type: string
+      base_extras:
+        description: "Salin dari base LineageOS: GameKeys (tombol bahu) + Leds (LED RGB) + Aperture (kamera cadangan)"
+        required: false
+        default: true
+        type: boolean
+      dolby_ui:
+        description: "UI Dolby: lunaris (default, kalau donor test-key / sudah punya Lunaris) | dax"
+        required: false
+        default: lunaris
+        type: choice
+        options:
+          - lunaris
+          - dax
+      maintainer:
+        description: "Maintainer di Tentang ponsel + status UNOFFICIAL (persist.sys.axion_maintainer). Kosong = tidak diubah"
+        required: false
+        default: "KingD2N"
+        type: string
+      boot_img_url:
+        description: "URL boot.img custom (default kernel D2N 5.10.271-gki-MIX, dicek vs modul vendor base). Kosong = kernel base"
+        required: false
+        default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/TES/boot.img"
+        type: string
+      disable_encryption:
+        description: "Matikan fileencryption/metadata_encryption di fstab"
+        required: false
+        default: true
+        type: boolean
+      debug_adb:
+        description: "ADB aktif sejak boot tanpa konfirmasi (untuk logcat kalau bootloop). Aplikasi bank bisa menolak jalan"
+        required: false
+        default: false
+        type: boolean
+      release_keys:
+        description: "Samarkan build jadi user/release-keys + ro.debuggable=0 (aplikasi bank & Play Integrity basic tanpa root)"
+        required: false
+        default: true
+        type: boolean
+      sepolicy_strict:
+        description: "Build GAGAL kalau sepolicy gabungan tidak bisa di-compile"
+        required: false
+        default: true
+        type: boolean
+      recovery_img_url:
+        description: "URL recovery.img custom (default TWRP D2N). Kosong = recovery HP tidak disentuh"
+        required: false
+        default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/ingres/TWRP_PROJECT_recovery_A16_A17_.img"
+        type: string
+      release_repo:
+        description: "owner/repo untuk GitHub Release (kosong = upload artifact)"
+        required: false
+        default: ""
+        type: string
+      gdrive_upload:
+        description: "Upload juga ke Google Drive (butuh secret RCLONE_CONFIG)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  port:
+    uses: ./.github/workflows/port-aosp-ingres.yml
+    secrets: inherit
+    with:
+      base_rom_url: ${{ inputs.base_rom_url }}
+      port_rom_url: ${{ inputs.port_rom_url }}
+      package_type: ${{ inputs.package_type }}
+      super_size: ${{ inputs.super_size }}
+      ext4_partitions: "vendor odm system vendor_dlkm product system_ext"
+      debloat: ${{ inputs.debloat }}
+      copy_from_base: ""
+      base_extras: ${{ inputs.base_extras }}
+      addons: ${{ inputs.addons }}
+      dolby_ui: ${{ inputs.dolby_ui }}
+      lunaris_apk_url: ""
+      maintainer: ${{ inputs.maintainer }}
+      boot_img_url: ${{ inputs.boot_img_url }}
+      disable_encryption: ${{ inputs.disable_encryption }}
+      rw_mount: true
+      debug_adb: ${{ inputs.debug_adb }}
+      release_keys: ${{ inputs.release_keys }}
+      sepolicy_strict: ${{ inputs.sepolicy_strict }}
+      recovery_img_url: ${{ inputs.recovery_img_url }}
+      release_repo: ${{ inputs.release_repo }}
+      gdrive_upload: ${{ inputs.gdrive_upload }}
+      port_flavor: aosp
+      gpu_driver_url: ${{ inputs.gpu_driver_url }}
+      gpu_renderengine: ${{ inputs.gpu_renderengine }}
+      title: "Port AxionOS"

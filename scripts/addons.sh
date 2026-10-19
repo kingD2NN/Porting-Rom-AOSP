@@ -11,6 +11,10 @@
 #  hotword    : "Hey Google" lewat DSP (HotwordEnrollment Google HEXAGON) dari ROM base, untuk donor GApps.
 #  wfd        : Cast layar / Wireless display Qualcomm (WfdService + wfdservice + WfdCommon.jar) dari
 #               ROM base LineageOS ingres, untuk donor yang framework-nya punya hook ExtendedRemoteDisplay.
+#  gpudriver  : driver GPU Adreno userspace (EGL/GLES/Vulkan/OpenCL) yang lebih baru dari vendor ROM
+#               donor (mis. AxionOS marble: Adreno V@0863.1, Vulkan 1.3.295) atau dari zip
+#               (GPU_DRIVER_URL) -> vendor base. Dicek: GPU ingres (Adreno 730) dikenal libgsl,
+#               versi lebih baru, dependensi & simbol library lengkap. Firmware GPU tidak diganti.
 #
 #  Semua addon: bahan di-stage dulu, dependensi library dicek terhadap ROM hasil port.
 #  Kalau ada yang kurang -> addon dilewati (ROM tetap aman, hanya tanpa fitur itu).
@@ -26,6 +30,24 @@ MIUICAMERA_VENDOR_REPO=${MIUICAMERA_VENDOR_REPO:-https://github.com/Gurinbone/an
 MIUICAMERA_BRANCH=${MIUICAMERA_BRANCH:-lineage-23.2}
 DOLBY_REPO=${DOLBY_REPO:-https://github.com/Gurinbone/hardware_dolby}
 DOLBY_BRANCH=${DOLBY_BRANCH:-Dolby-Vision-2.1}
+# cek simbol library JNI kamera vs libgui/libcamera_client ROM donor (scripts/sym_check.py).
+# Simbol C++ yang hilang = MiuiCamera crash saat dibuka -> addon dilewati. false = hanya laporan
+MIUICAMERA_SYMBOL_CHECK=${MIUICAMERA_SYMBOL_CHECK:-true}
+
+# ---- driver GPU (addon gpudriver)
+GPU_DRIVER_URL=${GPU_DRIVER_URL:-}          # kosong = driver dari vendor ROM donor; URL/path = zip modul Magisk/KSU/recovery
+GPU_DRIVER_FORCE=${GPU_DRIVER_FORCE:-false} # true = pasang walau versi tidak lebih baru dari driver base
+GPU_TARGET=${GPU_TARGET:-730}               # Adreno ingres (SM8450): harus ada di tabel GPU libgsl.so driver baru
+GPU_DRIVER_BANNED=${GPU_DRIVER_BANNED:-}    # kosong = daftar bawaan scripts/gpu_driver.py (library pemicu bootloop)
+GPU_SYMBOL_CHECK=${GPU_SYMBOL_CHECK:-true}  # simbol library driver yang hilang = surfaceflinger crash = bootloop
+# backend RenderEngine surfaceflinger setelah driver diganti (product/etc/build.prop, dimuat terakhir):
+#   skiaglthreaded (default) = GLES. Pengaman: driver custom yang gagal di Vulkan RenderEngine bikin
+#                    surfaceflinger abort berulang ("Could not initialize Vulkan RenderEngine") = bootloop.
+#                    Game/aplikasi tetap memakai Vulkan driver baru.
+#   skiavkthreaded = Vulkan (lebih baru, risiko di atas) | vendor = tidak diubah (ikut vendor base)
+GPU_RENDERENGINE=${GPU_RENDERENGINE:-skiaglthreaded}
+GPU_DONOR_VENDOR=""                          # root vendor donor hasil ekstrak (diisi gpu_extract_donor_vendor)
+GPU_DRIVER_INFO=""                           # ringkasan driver terpasang (output workflow)
 
 MIUICAMERA_LIBS="libcamera_algoup_jni.xiaomi.so libcamera_mianode_jni.xiaomi.so libmicampostproc_client.so vendor.xiaomi.hardware.campostproc@1.0.so"
 # blob Dolby DAX (tanpa Dolby Vision, codec2 Dolby & spatializer: butuh lib codec2/head-tracker
@@ -199,6 +221,90 @@ addon_remove_pkgs() { # label pkg...
     done < <(python3 "$SCRIPT_DIR/apk_index.py" "$P_FS" || true)
 }
 
+# cek simbol (sym_check.py): 0 = lengkap / cek tidak bisa jalan, 1 = ada simbol C++ hilang
+addon_symcheck() { # label check_dir search_dir...
+    local label=$1 chk=$2 args=() s rc=0 log="$WORK/addons/sym_$1.log"
+    shift 2
+    for s in "$@"; do [[ -d $s ]] && args+=(--search "$s"); done
+    timeout 900 python3 "$SCRIPT_DIR/sym_check.py" --label "addon $label" --check "$chk" "${args[@]}" > "$log" 2>&1 || rc=$?
+    case $rc in
+        0) grep -v '^ok ' "$log" | sed 's/^/  /' || true; return 0 ;;
+        1) grep -v '^ok ' "$log" | sed 's/^/    /' >&2 || true; return 1 ;;
+        *) warn "addon $label: cek simbol tidak bisa jalan (rc=$rc): $(tail -n1 "$log")"; return 0 ;;
+    esac
+}
+
+# build.prop yang dimuat init, urutan muat (yang belakangan menimpa): system, system_ext, vendor, odm, product
+addon_prop_files() {
+    local f
+    for f in "$P_FS/system/system/build.prop" "$P_FS/system_ext/etc/build.prop" "$B_FS/vendor/default.prop" \
+             "$B_FS/vendor/build.prop" "$B_FS/odm/etc/build.prop" "$B_FS"/odm/etc/build_*.prop "$P_FS/product/etc/build.prop"; do
+        [[ -f $f ]] && printf '%s\n' "$f"
+    done
+    return 0
+}
+prop_has() { grep -qE "^$(printf '%s' "$2" | sed 's/[.[\*^$/]/\\&/g')=" "$1" 2>/dev/null; }
+
+# set nilai di semua build.prop yang mendefinisikan key (+ file default kalau belum ada di mana pun)
+prop_set_all() { # key value [file_default]
+    local key=$1 val=$2 def=${3:-} f found=false
+    while IFS= read -r f; do
+        prop_has "$f" "$key" || continue
+        found=true
+        [[ $(get_prop "$f" "$key") == "$val" ]] && continue
+        addon_backup "$f"; log "  $key di ${f#"$WORK"/}: $(get_prop "$f" "$key") -> $val"
+        set_prop "$f" "$key" "$val"
+    done < <(addon_prop_files)
+    if ! $found && [[ -n $def ]]; then addon_backup "$def"; set_prop "$def" "$key" "$val"; fi
+}
+
+# tambah nilai ke prop daftar (dipisah koma) di semua build.prop yang mendefinisikannya dengan nilai
+# tidak kosong. Belum ada di mana pun + file_default diisi -> ditulis ke file itu.
+prop_list_add() { # key value [file_default]
+    local key=$1 val=$2 def=${3:-} f cur found=false
+    while IFS= read -r f; do
+        prop_has "$f" "$key" || continue
+        cur=$(get_prop "$f" "$key")
+        if [[ -z $cur ]]; then continue; fi
+        found=true
+        [[ ,$cur, == *",$val,"* ]] && continue
+        addon_backup "$f"; set_prop "$f" "$key" "$cur,$val"
+        log "  $key di ${f#"$WORK"/}: $cur -> $cur,$val"
+    done < <(addon_prop_files)
+    if ! $found && [[ -n $def ]]; then addon_backup "$def"; set_prop "$def" "$key" "$val"; fi
+}
+prop_list_del() { # key value
+    local key=$1 val=$2 f cur new
+    while IFS= read -r f; do
+        prop_has "$f" "$key" || continue
+        cur=$(get_prop "$f" "$key")
+        [[ ,$cur, == *",$val,"* ]] || continue
+        new=$(tr ',' '\n' <<< "$cur" | grep -vxF "$val" | paste -sd, - || true)
+        addon_backup "$f"; set_prop "$f" "$key" "$new"
+        log "  $key di ${f#"$WORK"/}: $val dibuang"
+    done < <(addon_prop_files)
+}
+
+# Kamera MIUI bawaan donor (mis. AxionOS marble) membawa library JNI kameranya sendiri yang
+# didaftarkan publik di public.libraries-<company>.txt (system/system_ext/product). MiuiCamera ingres
+# memuat library JNI kamera lain secara opsional (uses-native-library required=false: imagecodec,
+# jpegutil, ispinterface, ...). Kalau versi donor (dibuat untuk MiuiCamera & device lain) terdaftar,
+# ikut dimuat -> JNI tidak cocok -> crash. Entri itu dicoret dari daftar publik (file .so dibiarkan).
+miuicamera_drop_donor_jni() { # library yang dipasang addon...
+    local f keep=" $* " drop
+    while IFS= read -r -d '' f; do
+        drop=$(awk -v keep="$keep" '{l=$0; sub(/#.*/,"",l); split(l,a," "); n=a[1]
+               if (n ~ /camera/ && index(keep, " " n " ") == 0) print n}' "$f" | sort -u | tr '\n' ' ')
+        [[ -n ${drop// /} ]] || continue
+        addon_backup "$f"
+        awk -v drop=" $drop" '{l=$0; sub(/#.*/,"",l); split(l,a," "); if (a[1] != "" && index(drop, " " a[1] " ")) next; print}' \
+            "$f" > "$f.tmp" && cat "$f.tmp" > "$f"; rm -f "$f.tmp"
+        log "  ${f#"$P_FS"/}: library JNI kamera donor tidak lagi publik: $drop"
+    done < <(find "$P_FS/system/system/etc" "$P_FS/system_ext/etc" "$P_FS/product/etc" -maxdepth 1 \
+                -name 'public.libraries-*.txt' -print0 2>/dev/null || true)
+    return 0
+}
+
 # ------------------------------------------------------------------ MiuiCamera
 addon_miuicamera() {
     local d="$WORK/addons/miuicamera" sys="$P_FS/system/system" ven apk st oid size lfs_info got lib rc url f pkg n
@@ -239,6 +345,19 @@ addon_miuicamera() {
         warn "addon MiuiCamera DILEWATI: library JNI kamera butuh library system yang tidak ada di ROM donor (daftar MISSING di atas)"
         return 1
     fi
+    # library JNI dibuat untuk libgui/libcamera_client LineageOS 23.2 (+ shim): simbol C++ yang tidak
+    # diekspor framework donor = "cannot locate symbol" saat kamera dibuka (crash, bukan bootloop)
+    if ! addon_symcheck miuicamera "$d/stage" "$sys/lib64" "$P_FS/system_ext/lib64" "$P_FS/product/lib64"; then
+        if is_true "$MIUICAMERA_SYMBOL_CHECK"; then
+            warn "addon MiuiCamera DILEWATI: library JNI kamera memakai simbol yang tidak ada di framework ROM donor (daftar HILANG di atas) -> MiuiCamera pasti crash. Aperture tetap jadi kamera. Paksa: env MIUICAMERA_SYMBOL_CHECK=false"
+            return 1
+        fi
+        warn "addon MiuiCamera: simbol hilang diabaikan (MIUICAMERA_SYMBOL_CHECK=false), kamera kemungkinan crash"
+    fi
+    # sisi vendor: HAL post-processing kamera Xiaomi (vendor LineageOS ingres punya)
+    if ! grep -rqs 'vendor.xiaomi.hardware.campostproc' "$B_FS/vendor/etc/vintf" "$B_FS/odm/etc/vintf"; then
+        warn "addon MiuiCamera: vendor base tidak mendeklarasikan HAL vendor.xiaomi.hardware.campostproc -> mode yang butuh post-processing MIUI (malam, HDR, potret) bisa gagal; foto/video dasar tetap jalan"
+    fi
     cp "$apk" "$st/priv-app/MiuiCamera/"
     # tanda tangan bawaan APK sudah rusak (APK di-patch) -> wajib ditandatangani ulang
     rc=0; addon_sign "$st/priv-app/MiuiCamera" force || rc=$?
@@ -254,6 +373,9 @@ addon_miuicamera() {
 
     # pasang
     replace_donor_camera "MiuiCamera ingres (addon)"
+    local mine=()
+    for f in "$st"/lib64/*.so; do mine+=("$(basename "$f")"); done
+    miuicamera_drop_donor_jni "${mine[@]}"
     for f in "$st"/lib64/*.so; do addon_install "$f" "$sys/lib64/$(basename "$f")"; done
     rm -rf "$sys/priv-app/MiuiCamera"
     addon_install "$st/priv-app/MiuiCamera" "$sys/priv-app/MiuiCamera"
@@ -273,11 +395,17 @@ addon_miuicamera() {
     n=$(python3 "$SCRIPT_DIR/addon_tool.py" allowlist com.android.camera "$f" "$d/perms.txt" "$d/dev/configs/privapp-permissions-miuicamera.xml")
     log "  allowlist privapp com.android.camera: $n izin"
     addon_install "$d/dev/configs/miuicamera-hiddenapi-package-allowlist.xml" "$sys/etc/sysconfig/miuicamera-hiddenapi-package-allowlist.xml"
-    # props (device/xiaomi/miuicamera-ingres/system.prop)
-    addon_backup "$sys/build.prop"
-    set_prop "$sys/build.prop" ro.com.google.lens.oem_camera_package com.android.camera
-    set_prop "$sys/build.prop" persist.vendor.camera.privapp.list com.android.camera
-    set_prop "$sys/build.prop" ro.miui.notch 1
+    # props (device/xiaomi/miuicamera-ingres/system.prop). Prop yang juga diisi ROM donor di
+    # system_ext/product (dimuat SETELAH system, jadi menimpa) ikut diubah, mis. donor marble dengan
+    # kamera MIUI-nya sendiri atau donor yang mengunci kamera ke Aperture.
+    prop_set_all ro.com.google.lens.oem_camera_package com.android.camera "$sys/build.prop"
+    prop_set_all ro.miui.notch 1 "$sys/build.prop"
+    # daftar app yang boleh melihat semua kamera (ultrawide/makro/aux) di CameraService LineageOS
+    prop_list_add persist.vendor.camera.privapp.list com.android.camera "$sys/build.prop"
+    # vendor.camera.aux.packagelist: kosong/tidak ada = semua app melihat kamera aux; kalau diisi
+    # (mis. hanya Aperture), MiuiCamera hanya melihat kamera utama -> ditambahkan
+    prop_list_add vendor.camera.aux.packagelist com.android.camera
+    prop_list_del vendor.camera.aux.packageexcludelist com.android.camera
     # label SELinux file baru
     local rels=()
     for f in "$st"/lib64/*.so; do rels+=("system/lib64/$(basename "$f")"); done
@@ -717,6 +845,203 @@ addon_touchrate() {
     ok "addon touchrate: mode sampling sentuh tinggi aktif saat boot"
 }
 
+# ------------------------------------------------------------------ driver GPU (Adreno)
+addon_requested() { # nama -> 0 kalau ada di ADDONS
+    local a
+    for a in ${ADDONS//,/ }; do
+        a=${a,,}
+        case $a in gpu-driver|gpu_driver|adreno) a=gpudriver ;; miui-camera|miui_camera) a=miuicamera ;; esac
+        if [[ $a == "$1" ]]; then return 0; fi
+    done
+    return 1
+}
+gpu_want_donor_vendor() { addon_requested gpudriver && [[ -z $GPU_DRIVER_URL ]]; }
+
+# port.sh, setelah partisi port diekstrak: vendor ROM donor -> $WORK/donor_vendor, hanya folder yang
+# dipakai addon gpudriver (lib, lib64, gpu, etc/permissions) supaya hemat disk. Tidak pernah fatal.
+gpu_extract_donor_vendor() {
+    local img="$P_IMG/vendor.img" root="$WORK/donor_vendor" t tl thr lg="$WORK/extract_donor_vendor.log" tools=() ver
+    gpu_want_donor_vendor || return 0
+    if [[ ! -f $img ]]; then
+        warn "addon gpudriver: ROM donor tidak punya vendor.img -> driver GPU donor tidak bisa diambil (isi gpu_driver_url untuk zip driver)"
+        return 0
+    fi
+    log "ekstrak vendor donor (sumber driver GPU)"
+    rm -rf "$root"; mkdir -p "$root"
+    if python3 "$SCRIPT_DIR/lp_tool.py" sparse "$img"; then simg2img "$img" "$img.raw" && mv -f "$img.raw" "$img"; fi
+    t=$(gettype -i "$img" 2>/dev/null || true)
+    case $t in
+        erofs)
+            thr=$(nproc); if [[ $thr -gt 4 ]]; then thr=4; fi
+            if [[ -n ${EXTRACT_EROFS:-} ]]; then tools+=("$EXTRACT_EROFS"); fi
+            tools+=("$BIN/extract.erofs")
+            for tl in "${tools[@]}"; do
+                rm -rf "${root:?}"/*
+                if timeout "${EXTRACT_TIMEOUT:-1800}" "$tl" -x -i "$img" -o "$root" -T"$thr" > "$lg" 2>&1 \
+                        && [[ -d $root/vendor/lib64 ]]; then break; fi
+            done ;;
+        ext)
+            python3 "$SCRIPT_DIR/imgextractor_compat.py" "$PYBIN/imgextractor/imgextractor.py" "$img" "$root" > "$lg" 2>&1 || true ;;
+        *)  warn "addon gpudriver: vendor.img donor tipe '$t' tidak dikenal"; rm -rf "$root"; return 0 ;;
+    esac
+    if [[ ! -f $root/vendor/lib64/egl/libGLESv2_adreno.so ]]; then
+        warn "addon gpudriver: vendor donor tidak berisi driver Adreno (lib64/egl/libGLESv2_adreno.so) -> addon gpudriver tidak bisa memakai driver donor"
+        tail -n 5 "$lg" >&2 || true
+        rm -rf "$root"; return 0
+    fi
+    find "$root/vendor" -mindepth 1 -maxdepth 1 ! -name lib ! -name lib64 ! -name gpu ! -name etc ! -name build.prop \
+        -exec rm -rf {} + 2>/dev/null || true
+    find "$root/vendor/etc" -mindepth 1 -maxdepth 1 ! -name permissions -exec rm -rf {} + 2>/dev/null || true
+    GPU_DONOR_VENDOR="$root/vendor"
+    ver=$(python3 "$SCRIPT_DIR/gpu_driver.py" info "$GPU_DONOR_VENDOR" | sed -n 's/^version=//p' || true)
+    ok "vendor donor ($(get_prop "$GPU_DONOR_VENDOR/build.prop" ro.product.vendor.device)): driver Adreno V@${ver:-?} siap untuk addon gpudriver"
+    return 0
+}
+
+# Driver GPU Adreno userspace baru -> vendor base. Yang diganti: lib*/egl/*, lib*/hw/vulkan.adreno.so,
+# libgsl, libllvm-*, libadreno*, libCB/libOpenCL/libkcl/libkernelmanager/libgpudataproducer,
+# vendor/gpu/ (kbc), + library DT_NEEDED baru yang tidak ada di vendor base (diambil dari sumber yang sama).
+# Firmware GPU (vendor/firmware a730_sqe.fw, gmu_gen70000.bin) TIDAK diganti: dimuat kgsl kernel.
+addon_gpudriver() {
+    local d="$WORK/addons/gpudriver" vend="$B_FS/vendor" src="" f rel nver bver gpus sinfo binfo bl=64 rc=0 n=0 line
+    local plan=() newp=() ctxs=() bits=() p dcfg="" vs="$B_FS/vendor/etc/selinux"
+    ADDON_CUR=gpudriver
+    if [[ ! -d $vend/lib64 ]]; then warn "addon gpudriver: vendor base tidak diekstrak"; return 1; fi
+    rm -rf "$d"; mkdir -p "$d"
+    if [[ -n $GPU_DRIVER_URL ]]; then
+        log "addon gpudriver: sumber $GPU_DRIVER_URL"
+        f=$(fetch "$GPU_DRIVER_URL" "$d/dl" gpu_driver.zip) || { warn "addon gpudriver: unduh gagal"; return 1; }
+        mkdir -p "$d/src"
+        case $(head -c 4 "$f" | od -An -tx1 | tr -d ' \n') in
+            504b0304) unzip -q -o "$f" -d "$d/src" || { warn "addon gpudriver: zip rusak"; return 1; } ;;
+            1f8b*|fd377a58|28b52ffd) tar -xf "$f" -C "$d/src" || { warn "addon gpudriver: arsip rusak"; return 1; } ;;
+            *) warn "addon gpudriver: $GPU_DRIVER_URL bukan zip/tar"; return 1 ;;
+        esac
+        rm -f "$f"
+        src=$(python3 "$SCRIPT_DIR/gpu_driver.py" root "$d/src" || true)
+        if [[ -z $src ]]; then
+            warn "addon gpudriver DILEWATI: arsip tidak berisi driver Adreno sistem (.../vendor/lib64/egl/libGLESv2_adreno.so). Driver adrenotools/Turnip (khusus emulator) tidak bisa dipasang ke sistem"
+            return 1
+        fi
+    else
+        src=$GPU_DONOR_VENDOR
+        if [[ -z $src || ! -d $src ]]; then warn "addon gpudriver DILEWATI: driver dari vendor ROM donor tidak tersedia (lihat pesan ekstrak vendor donor)"; return 1; fi
+        dcfg="$WORK/donor_vendor/config/vendor_file_contexts"
+        log "addon gpudriver: sumber vendor ROM donor ($(get_prop "$src/build.prop" ro.product.vendor.device))"
+    fi
+    sinfo=$(python3 "$SCRIPT_DIR/gpu_driver.py" info "$src" || true)
+    binfo=$(python3 "$SCRIPT_DIR/gpu_driver.py" info "$vend" || true)
+    nver=$(sed -n 's/^version=//p' <<< "$sinfo"); bver=$(sed -n 's/^version=//p' <<< "$binfo")
+    gpus=$(sed -n 's/^gpus=//p' <<< "$sinfo")
+    read -r -a bits <<< "$(sed -n 's/^bits=//p' <<< "$sinfo")"
+    log "  driver vendor base: V@${bver:-?}   driver baru: V@${nver:-?} (${bits[*]:-?} bit)"
+    if [[ -z $nver ]] || ! in_list 64 "${bits[*]}"; then
+        warn "addon gpudriver DILEWATI: driver sumber tidak lengkap (versi/libgsl.so/lib64 egl tidak terbaca)"; return 1
+    fi
+    if ! in_list "$GPU_TARGET" "$gpus"; then
+        warn "addon gpudriver DILEWATI: libgsl.so V@$nver tidak mengenal Adreno $GPU_TARGET (GPU ingres) -> surfaceflinger gagal start = bootloop"
+        return 1
+    fi
+    if [[ -n $bver ]] && ! python3 "$SCRIPT_DIR/gpu_driver.py" newer "$nver" "$bver"; then
+        if ! is_true "$GPU_DRIVER_FORCE"; then
+            warn "addon gpudriver: driver base V@$bver sudah sama/lebih baru dari V@$nver -> tidak diganti (paksa: env GPU_DRIVER_FORCE=true)"
+            return 1
+        fi
+        warn "  V@$nver tidak lebih baru dari V@$bver, tetap dipasang (GPU_DRIVER_FORCE=true)"
+    fi
+    if in_list 32 "${bits[*]}"; then bl="64,32"
+    elif [[ -f $vend/lib/egl/libGLESv2_adreno.so ]]; then
+        log "  sumber hanya punya driver 64-bit: driver 32-bit vendor base (V@$bver) dipertahankan untuk app 32-bit"
+    fi
+    python3 "$SCRIPT_DIR/gpu_driver.py" plan --src "$src" --base "$vend" --base "$B_FS/odm" --bits "$bl" \
+        ${GPU_DRIVER_BANNED:+--banned "$GPU_DRIVER_BANNED"} > "$d/plan.txt" 2> "$d/plan.log" || rc=$?
+    sed 's/^/  /' "$d/plan.log"
+    if [[ $rc -eq 2 ]]; then
+        warn "addon gpudriver DILEWATI: driver butuh library yang terbukti memicu bootloop di ingres (TERLARANG di atas)"; return 1
+    elif [[ $rc -ne 0 ]]; then
+        warn "addon gpudriver DILEWATI: daftar file driver gagal dibuat"; return 1
+    fi
+    mapfile -t plan < "$d/plan.txt"
+    [[ ${#plan[@]} -gt 0 ]] || { warn "addon gpudriver DILEWATI: tidak ada file driver"; return 1; }
+
+    # stage (symlink dipertahankan) + cek dependensi & simbol terhadap vendor base + system donor (LLNDK)
+    for rel in "${plan[@]}"; do
+        mkdir -p "$d/stage/vendor/$(dirname "$rel")"
+        cp -a "$src/$rel" "$d/stage/vendor/$rel"
+    done
+    if ! addon_deps gpudriver "$d/stage" "$vend" "$B_FS/odm" "$P_FS/system/system" "$P_FS/system_ext"; then
+        warn "addon gpudriver DILEWATI: driver butuh library yang tidak ada di vendor base / system donor (daftar MISSING di atas)"
+        return 1
+    fi
+    local sd=() lb
+    for lb in lib64 lib; do
+        for p in "$vend/$lb" "$vend/$lb/egl" "$vend/$lb/hw" "$B_FS/odm/$lb" "$P_FS/system/system/$lb" "$P_FS/system_ext/$lb"; do sd+=("$p"); done
+    done
+    if ! addon_symcheck gpudriver "$d/stage/vendor" "${sd[@]}"; then
+        if is_true "$GPU_SYMBOL_CHECK"; then
+            warn "addon gpudriver DILEWATI: library driver memakai simbol yang tidak ada di vendor base / system donor (daftar HILANG di atas) -> surfaceflinger crash = bootloop"
+            return 1
+        fi
+        warn "addon gpudriver: simbol hilang diabaikan (GPU_SYMBOL_CHECK=false) - risiko bootloop"
+    fi
+
+    # path baru (belum ada di vendor base): butuh label SELinux persis
+    for rel in "${plan[@]}"; do
+        p=$(dirname "$rel")
+        while [[ $p != . && ! -e $vend/$p ]]; do
+            in_list "$p" "${newp[*]}" || newp+=("$p")
+            p=$(dirname "$p")
+        done
+        if [[ ! -e $vend/$rel && ! -L $vend/$rel ]]; then newp+=("$rel"); fi
+    done
+    # pasang
+    for rel in "${plan[@]}"; do
+        addon_mkdir "$vend/$(dirname "$rel")"
+        if [[ -e $vend/$rel || -L $vend/$rel ]]; then addon_backup "$vend/$rel"; rm -f "$vend/$rel"; else addon_new "$vend/$rel"; fi
+        cp -a "$d/stage/vendor/$rel" "$vend/$rel"
+        n=$((n + 1))
+    done
+    # fitur Vulkan/deqp yang diumumkan driver baru (mis. android.hardware.vulkan.version-1_3.xml)
+    for f in "$src"/etc/permissions/android.hardware.vulkan.*.xml "$src"/etc/permissions/android.software.vulkan.deqp.level*.xml \
+             "$src"/etc/permissions/android.software.opengles.deqp.level*.xml; do
+        [[ -f $f && ! -e $vend/etc/permissions/$(basename "$f") ]] || continue
+        addon_install "$f" "$vend/etc/permissions/$(basename "$f")"
+        chmod 644 "$vend/etc/permissions/$(basename "$f")"
+        newp+=("etc/permissions/$(basename "$f")")
+        log "  fitur baru: etc/permissions/$(basename "$f")"
+    done
+    if [[ ${#newp[@]} -gt 0 ]]; then
+        grep -ohE '^\((type|typeattribute) [A-Za-z0-9_]+\)' "$vs/vendor_sepolicy.cil" "$vs/plat_pub_versioned.cil" \
+            "$P_FS/system/system/etc/selinux/plat_sepolicy.cil" 2>/dev/null | sed -E 's/^\([a-z]+ ([^)]*)\)/\1/' > "$d/types.txt" || true
+        python3 "$SCRIPT_DIR/gpu_driver.py" labels --cfg "$B_FS/config/vendor_file_contexts" --fc "$vs/vendor_file_contexts" \
+            ${dcfg:+--donor-cfg "$dcfg"} --types "$d/types.txt" "${newp[@]}" > "$d/labels.txt" || true
+        while IFS= read -r line; do
+            case $line in
+                CTX\ *) ctxs+=("${line#CTX }") ;;
+                FC\ *)  addon_append_line "$vs/vendor_file_contexts" "${line#FC }" ;;
+            esac
+        done < "$d/labels.txt"
+        if [[ ${#ctxs[@]} -gt 0 ]]; then addon_ctx "$B_FS" vendor "${ctxs[@]}" || true; fi
+    fi
+    # surfaceflinger RenderEngine (product dimuat terakhir -> menimpa nilai vendor)
+    case ${GPU_RENDERENGINE,,} in
+        ""|vendor|keep) log "  RenderEngine: tidak diubah ($(get_prop "$vend/build.prop" debug.renderengine.backend))" ;;
+        skiagl|skiaglthreaded|skiavk|skiavkthreaded)
+            addon_backup "$P_FS/product/etc/build.prop"
+            set_prop "$P_FS/product/etc/build.prop" debug.renderengine.backend "${GPU_RENDERENGINE,,}"
+            log "  RenderEngine surfaceflinger: debug.renderengine.backend=${GPU_RENDERENGINE,,} (product/etc/build.prop)" ;;
+        *) warn "  GPU_RENDERENGINE '$GPU_RENDERENGINE' tidak dikenal (skiaglthreaded|skiavkthreaded|skiagl|skiavk|vendor), tidak diubah" ;;
+    esac
+    if [[ -n $(get_prop "$vend/build.prop" ro.gfx.driver.1) ]]; then
+        log "  catatan: driver updatable vendor ($(get_prop "$vend/build.prop" ro.gfx.driver.1)) tetap V@$bver, hanya dipakai app yang memilih 'prerelease driver' di Opsi developer"
+    fi
+    rm -rf "$d/stage" "$d/src"
+    # shellcheck disable=SC2034  # dipakai port.sh (output workflow)
+    GPU_DRIVER_INFO="Adreno V@$nver (base V@${bver:-?}), RenderEngine ${GPU_RENDERENGINE:-vendor}"
+    ADDON_DONE+=(gpudriver)
+    ok "addon gpudriver terpasang: Adreno V@$nver (sebelumnya V@${bver:-?}), $n file driver di vendor. Cek di HP: dumpsys SurfaceFlinger | grep GLES / AIDA64 / vulkaninfo"
+}
+
 # batalkan addon: tanpa argumen = addon yang sedang dipasang ($ADDON_CUR), "all" = semua addon
 # (dipanggil sepolicy_compile_check kalau sepolicy gabungan gagal di-compile karena baris addon).
 # Urutan mundur: file baru dihapus, file yang diubah dikembalikan ke keadaan sebelum addon.
@@ -782,8 +1107,10 @@ run_addons() {
             touchrate|touch-rate|htpr) addon_touchrate || warn "addon touchrate tidak dipasang (lihat pesan di atas)" ;;
             wfd|cast|wifi-display) addon_wfd || warn "addon wfd (cast layar) tidak dipasang (lihat pesan di atas)" ;;
             hotword|ok-google|hey-google) addon_hotword || warn "addon hotword (Hey Google) tidak dipasang (lihat pesan di atas)" ;;
-            *) warn "ADDONS: '$a' tidak dikenal (pilihan: miuicamera dolby touchrate wfd hotword none)" ;;
+            gpudriver|gpu-driver|gpu_driver|adreno) addon_gpudriver || warn "addon gpudriver (driver GPU Adreno) tidak dipasang, driver vendor base dipakai (lihat pesan di atas)" ;;
+            *) warn "ADDONS: '$a' tidak dikenal (pilihan: miuicamera dolby touchrate wfd hotword gpudriver none)" ;;
         esac
     done
+    rm -rf "$WORK/donor_vendor" "$WORK/addons/gpudriver"
     if [[ ${#ADDON_DONE[@]} -gt 0 ]]; then ok "addons terpasang: ${ADDON_DONE[*]}"; fi
 }

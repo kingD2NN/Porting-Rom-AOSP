@@ -2021,6 +2021,7 @@ main() {
     if [[ -n $RECOVERY_IMG ]]; then check_url RECOVERY_IMG "$RECOVERY_IMG"; fi
     if [[ -n $BOOT_IMG ]]; then check_url BOOT_IMG "$BOOT_IMG"; fi
     if [[ -n $GBOARD_APK ]]; then check_url GBOARD_APK "$GBOARD_APK"; fi
+    if [[ -n $GPU_DRIVER_URL ]] && addon_requested gpudriver; then check_url GPU_DRIVER_URL "$GPU_DRIVER_URL"; fi
     group_end
 
     # ---------------- 1. BASE
@@ -2061,7 +2062,10 @@ main() {
     # ---------------- 2. PORT
     group_start "2/7 Port ROM (donor AOSP)"
     [[ -n $port_file ]] || port_file=$(fetch "$PORT_ROM" "$WORK/dl" port_rom)
-    unpack_rom "$port_file" "$P_IMG" port "${PORT_PARTITIONS// /,}"
+    local pwant=${PORT_PARTITIONS// /,}
+    # addon gpudriver tanpa gpu_driver_url: driver Adreno diambil dari vendor ROM donor
+    if gpu_want_donor_vendor; then pwant+=",vendor"; log "addon gpudriver: vendor donor ikut diambil (sumber driver GPU)"; fi
+    unpack_rom "$port_file" "$P_IMG" port "$pwant"
     for p in $PORT_PARTITIONS; do
         [[ -f $P_IMG/$p.img ]] || { warn "port tidak punya $p.img, pakai milik base"; continue; }
     done
@@ -2088,8 +2092,10 @@ main() {
         [[ -f $P_IMG/$p.img ]] || continue
         log "ekstrak port $p"; extract_img "$P_IMG/$p.img" "$P_FS"; rm -f "$P_IMG/$p.img"
     done
+    gpu_extract_donor_vendor || warn "ekstrak vendor donor (addon gpudriver) gagal, driver vendor base dipakai"
     oplus_extract
     oplus_merge_my
+    if gpu_want_donor_vendor; then rm -f "$P_IMG/vendor.img"; fi
     dfree
     group_end
 
@@ -2160,6 +2166,12 @@ main() {
     vintf_tool_check
     sepol_vendor_compat
     sepolicy_compile_check
+    if [[ -n ${GITHUB_OUTPUT:-} ]]; then
+        # addon yang benar-benar terpasang (setelah kemungkinan dibatalkan cek sepolicy) -> ringkasan workflow
+        { echo "addons_done=${ADDON_DONE[*]:-none}"
+          if in_list gpudriver "${ADDON_DONE[*]:-}"; then echo "gpu_driver=$GPU_DRIVER_INFO"; else echo "gpu_driver=bawaan vendor base"; fi
+        } >> "$GITHUB_OUTPUT"
+    fi
     rm -rf "${B_FS:?}/product" "$B_FS/config/product_"* "${B_FS:?}/system_ext" "$B_FS/config/system_ext_"*
     rm -f "$B_IMG/product.img"
     patch_vendor_fstab

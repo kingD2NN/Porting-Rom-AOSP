@@ -45,7 +45,7 @@ on:
         default: true
         type: boolean
       addons:
-        description: "Addon (pisah spasi): miuicamera, dolby, touchrate, wfd (cast layar), hotword (Hey Google DSP). Dicek per versi Android. Kosong/none = tanpa addon"
+        description: "Addon (pisah spasi): miuicamera, dolby, touchrate, wfd (cast layar), hotword (Hey Google DSP), gpudriver (driver Adreno lebih baru dari vendor donor). Dicek per versi Android. Kosong/none = tanpa addon"
         required: false
         default: "miuicamera dolby touchrate wfd hotword"
         type: string
@@ -140,6 +140,10 @@ on:
       oplus_rom_name: { type: string, required: false, default: auto }
       oplus_debloat: { type: boolean, required: false, default: true }
       title: { type: string, required: false, default: "Port AOSP" }
+      # addon gpudriver: kosong = driver Adreno dari vendor ROM donor; URL = zip modul Magisk/KSU/recovery
+      gpu_driver_url: { type: string, required: false, default: "" }
+      # RenderEngine surfaceflinger setelah driver diganti: skiaglthreaded | skiavkthreaded | vendor
+      gpu_renderengine: { type: string, required: false, default: skiaglthreaded }
     secrets:
       RELEASE_TOKEN: { required: false }
       RCLONE_CONFIG: { required: false }
@@ -336,6 +340,8 @@ jobs:
           OPLUS_ROM_NAME: ${{ inputs.oplus_rom_name || 'auto' }}
           OPLUS_DEBLOAT: ${{ inputs.oplus_debloat == false && 'false' || 'true' }}
           RELEASE_KEYS: ${{ inputs.release_keys == false && 'false' || 'true' }}
+          GPU_DRIVER_URL: ${{ inputs.gpu_driver_url }}
+          GPU_RENDERENGINE: ${{ inputs.gpu_renderengine || 'skiaglthreaded' }}
         run: |
           set -euo pipefail
           sudo -E env "PATH=$PATH" bash scripts/port.sh
@@ -433,6 +439,8 @@ jobs:
           BOOT: ${{ steps.port.outputs.boot_used || inputs.boot_img_url }}
           PKG: ${{ inputs.package_type }}
           ADDONS_IN: ${{ inputs.addons }}
+          ADDONS_DONE: ${{ steps.port.outputs.addons_done }}
+          GPU_DRIVER: ${{ steps.port.outputs.gpu_driver }}
         run: |
           {
             echo "## ${{ inputs.title || 'Port AOSP' }} -> ${TARGET_DEVICE}"
@@ -450,7 +458,9 @@ jobs:
             echo "| Debug ADB | ${DEBUG_ADB} |"
             echo "| user/release-keys | ${RELEASE_KEYS_IN} |"
             echo "| Paket | ${PKG:-ota} |"
-            echo "| Addons | ${ADDONS_IN:-none} |"
+            echo "| Addons diminta | ${ADDONS_IN:-none} |"
+            echo "| Addons terpasang | ${ADDONS_DONE:-?} |"
+            if [[ " ${ADDONS_IN} " == *" gpudriver "* ]]; then echo "| Driver GPU | ${GPU_DRIVER:-?} |"; fi
             if [ -n "${GDRIVE_LINK:-}" ]; then echo "| Google Drive | ${GDRIVE_LINK} |"; fi
             if ls out/*.sha256 >/dev/null 2>&1; then
               echo
