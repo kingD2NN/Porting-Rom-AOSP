@@ -76,6 +76,7 @@ RECOVERY_SUPER=${RECOVERY_SUPER:-raw}      # hanya INSTALLER=ours: raw = images/
 # LightOS. Sumber: OTA full / fastboot ROM stok ingres (dicek pre-device / flash_all = TARGET_DEVICE).
 # Kosong / none = tanpa firmware. Dilewati kalau ROM base sudah membawa firmware.
 FIRMWARE_URL=${FIRMWARE_URL:-}
+FIRMWARE_CACHE=${FIRMWARE_CACHE:-}         # folder cache image firmware per URL (actions/cache di workflow)
 FIRMWARE_PARTS=${FIRMWARE_PARTS:-"abl aop aop_config bluetooth cpucp devcfg dsp featenabler hyp imagefv keymaster modem qupfw shrm tz uefi uefisecapp xbl xbl_config xbl_ramdump"}
 RECOVERY_IMG=${RECOVERY_IMG:-}              # opsional: URL/path recovery.img custom (OrangeFox dll)
 BOOT_IMG=${BOOT_IMG:-}                      # opsional: URL/path boot.img custom (kernel), menggantikan boot.img base
@@ -1597,16 +1598,20 @@ boot_kernel_swap() { # base.img custom.img out.img
     mv -f "$d/new.img" "$3"; rm -rf "$d"
 }
 
-# modul kernel ROM base (vendor_boot ramdisk + vendor_dlkm + vendor/odm lib/modules) -> folder
+# modul kernel ROM base (vendor_boot ramdisk + vendor_dlkm + vendor/odm lib/modules) -> folder.
+# Hasil: KMOD_N (jumlah .ko) dan KMOD_WARN (peringatan); dipanggil langsung, bukan lewat $(...).
 base_kernel_modules() { # out_dir (boot.img di folder paket dipakai untuk mencari vendor_boot.img)
     local out=$1 imgdir=$2 vb img t
+    KMOD_N=0 KMOD_WARN=""
     rm -rf "$out"; mkdir -p "$out"
     for vb in "$imgdir/vendor_boot.img" "$B_IMG/vendor_boot.img"; do
         if [[ -f $vb ]]; then python3 "$SCRIPT_DIR/kernel_crc.py" vbmods "$vb" "$out/vendor_boot" >/dev/null 2>&1 || true; break; fi
     done
     # vendor_dlkm base sudah dipindah ke folder image paket / OUT_IMG_TMP saat boot diganti
     img=""
-    for t in "$imgdir/vendor_dlkm.img" "${OUT_IMG_TMP:-/nonexistent}/vendor_dlkm.img" "$B_IMG/vendor_dlkm.img"; do
+    # paket recovery: OUT_IMG_TMP sudah dihapus setelah super.img dibuat -> salinan $WORK/base_vendor_dlkm.img
+    for t in "$imgdir/vendor_dlkm.img" "${OUT_IMG_TMP:-/nonexistent}/vendor_dlkm.img" "$B_IMG/vendor_dlkm.img" \
+             "$WORK/base_vendor_dlkm.img"; do
         if [[ -f $t ]]; then img=$t; break; fi
     done
     if [[ -n $img && $(head -c4 "$img" | od -An -tx1 | tr -d ' \n') == 3aff26ed ]]; then
@@ -1622,14 +1627,14 @@ base_kernel_modules() { # out_dir (boot.img di folder paket dipakai untuk mencar
             debugfs -R "rdump /lib/modules $out/vendor_dlkm" "$img" >/dev/null 2>&1 || true
         fi
         rm -f "$out/vendor_dlkm.raw"
-        [[ -n $(find "$out/vendor_dlkm" -name '*.ko' -print -quit) ]] || warn "boot: modul vendor_dlkm base tidak terbaca (${img##*/}), cek kernel hanya memakai modul vendor_boot"
+        [[ -n $(find "$out/vendor_dlkm" -name '*.ko' -print -quit) ]] || KMOD_WARN="boot: modul vendor_dlkm base tidak terbaca (${img##*/}), cek kernel hanya memakai modul vendor_boot"
     else
-        warn "boot: vendor_dlkm.img base tidak ditemukan, cek kernel hanya memakai modul vendor_boot"
+        KMOD_WARN="boot: vendor_dlkm.img base tidak ditemukan, cek kernel hanya memakai modul vendor_boot"
     fi
     for d in "$B_FS/vendor/lib/modules" "$B_FS/vendor_dlkm/lib/modules" "$B_FS/odm/lib/modules"; do
         if [[ -d $d ]]; then mkdir -p "$out/fs"; cp -a "$d" "$out/fs/$(basename "$(dirname "$(dirname "$d")")")" 2>/dev/null || true; fi
     done
-    find "$out" -name '*.ko' | wc -l
+    KMOD_N=$(find "$out" -name '*.ko' | wc -l)
 }
 
 # 0 = kernel custom memuat semua modul vendor base yang juga dimuat kernel base (atau cek tidak bisa jalan)
@@ -1640,7 +1645,9 @@ kernel_module_check() { # base_boot.img custom_boot.img
         warn "boot: kallsyms-finder (pip vmlinux-to-elf) tidak ada, kecocokan CRC kernel vs modul vendor tidak dicek"
         return 0
     fi
-    n=$(base_kernel_modules "$WORK/base_kmods" "$(dirname "$1")")
+    base_kernel_modules "$WORK/base_kmods" "$(dirname "$1")"
+    n=$KMOD_N
+    if [[ -n $KMOD_WARN ]]; then warn "$KMOD_WARN"; fi
     if [[ ${n:-0} -eq 0 ]]; then warn "boot: modul kernel base tidak terbaca, kecocokan kernel tidak dicek"; return 0; fi
     timeout 900 python3 "$SCRIPT_DIR/kernel_crc.py" check "$2" --base "$1" "$WORK/base_kmods" > "$log" 2>&1 || rc=$?
     case $rc in
@@ -1906,6 +1913,23 @@ add_firmware() { # dst
     if [[ -f $dst/xbl.img || -f $dst/xbl_config.img ]]; then
         ok "firmware: ROM base sudah membawa firmware, FIRMWARE_URL tidak dipakai"; return 0
     fi
+    local cdir=""
+    if [[ -n $FIRMWARE_CACHE ]]; then
+        cdir="$FIRMWARE_CACHE/$(printf '%s|%s' "$FIRMWARE_URL" "$FIRMWARE_PARTS" | sha256sum | cut -c1-16)"
+        if [[ -f $cdir/.done ]] && compgen -G "$cdir/*.img" >/dev/null; then
+            for f in "$cdir"/*.img; do
+                p=$(basename "$f" .img)
+                if in_list "$p" "$NEVER_FLASH"; then continue; fi
+                cp -f "$f" "$dst/"; have+=" $p"
+            done
+            dev=$(cat "$cdir/.device" 2>/dev/null || echo "$TARGET_DEVICE")
+            anti=$(cat "$cdir/.anti" 2>/dev/null || true)
+            if [[ -n $anti ]]; then ANTI_VER=$anti; fi
+            ok "firmware ${dev} dari cache ($(basename "${FIRMWARE_URL%%\?*}"), tanpa unduh ulang):$have"
+            warn "firmware: ROM ini mem-flash firmware stok ($(basename "${FIRMWARE_URL%%\?*}")). Jangan flash kalau HP memakai firmware lebih BARU (anti-rollback${ANTI_VER:+ $ANTI_VER})"
+            return 0
+        fi
+    fi
     src=$(fetch "$FIRMWARE_URL" "$WORK/dl" firmware_rom)
     rm -rf "$fw"; mkdir -p "$fw"
     magic=$(head -c 4 "$src" | od -An -tx1 | tr -d ' \n')
@@ -1945,12 +1969,18 @@ add_firmware() { # dst
         rm -rf "$fw/x"
     fi
     if ! is_true "$KEEP_DOWNLOADS" && [[ $src == "$WORK/dl/"* ]]; then rm -f "$src"; fi
+    if [[ -n $cdir ]]; then rm -rf "$cdir"; mkdir -p "$cdir"; fi
     for f in "$fw"/img/*.img; do
         [[ -f $f ]] || continue
         p=$(basename "$f" .img)
         if in_list "$p" "$NEVER_FLASH"; then rm -f "$f"; continue; fi
+        if [[ -n $cdir ]]; then cp -f "$f" "$cdir/"; fi
         mv -f "$f" "$dst/"; have+=" $p"
     done
+    if [[ -n $cdir && -n $have ]]; then
+        echo "${dev:-$TARGET_DEVICE}" > "$cdir/.device"; echo "$anti" > "$cdir/.anti"; touch "$cdir/.done"
+        log "  firmware disimpan ke cache ($(du -sh "$cdir" | cut -f1)), build berikutnya tanpa unduh ulang"
+    fi
     rm -rf "$fw"
     [[ -n $have ]] || die "firmware: tidak ada image firmware yang didapat dari $FIRMWARE_URL"
     if [[ -n $anti ]]; then ANTI_VER=$anti; fi
@@ -2325,6 +2355,10 @@ main() {
     log "installer: $mode"
     if [[ $mode == base ]]; then SUPER_SPARSE=true; fi
     build_super "$super_list" "$pkg/images/super.img"
+    # vendor_dlkm base dipakai cek CRC kernel custom (replace_boot) setelah OUT_IMG_TMP dihapus
+    if [[ -n $BOOT_IMG && -f $OUT_IMG_TMP/vendor_dlkm.img ]]; then
+        mv -f "$OUT_IMG_TMP/vendor_dlkm.img" "$WORK/base_vendor_dlkm.img"
+    fi
     rm -rf "$OUT_IMG_TMP"
     group_end
 

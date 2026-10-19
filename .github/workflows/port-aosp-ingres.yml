@@ -315,6 +315,22 @@ jobs:
           [ "$rc" -lt 126 ] || { echo "extract.erofs tidak bisa dijalankan (rc=$rc)"; exit 1; }
           echo "EXTRACT_EROFS=$bin" >> "$GITHUB_ENV"
 
+      # firmware ingres (package_type recovery) dari OTA stok 5+ GB: image firmware (~400 MB) di-cache
+      # per URL, build berikutnya tidak mengunduh OTA lagi
+      - name: Kunci cache firmware
+        id: fwkey
+        if: inputs.package_type == 'recovery' && inputs.firmware_url != '' && inputs.firmware_url != 'none'
+        env:
+          U: ${{ inputs.firmware_url }}
+        run: echo "key=firmware-$(printf '%s' "$U" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache firmware
+        if: steps.fwkey.outputs.key != ''
+        uses: actions/cache@v4
+        with:
+          path: fw-cache
+          key: ${{ steps.fwkey.outputs.key }}
+
       - name: Pilih lokasi kerja (disk paling lega)
         run: |
           set -euo pipefail
@@ -349,6 +365,7 @@ jobs:
           LUNARIS_DOLBY_APK: ${{ inputs.lunaris_apk_url }}
           PACKAGE_TYPE: ${{ inputs.package_type }}
           FIRMWARE_URL: ${{ inputs.firmware_url }}
+          FIRMWARE_CACHE: ${{ github.workspace }}/fw-cache
           BOOT_IMG: ${{ inputs.boot_img_url }}
           DISABLE_ENCRYPTION: ${{ inputs.disable_encryption }}
           RW_MOUNT: ${{ inputs.rw_mount }}
