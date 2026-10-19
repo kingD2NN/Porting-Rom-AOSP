@@ -1,0 +1,77 @@
+# debloat_aosp.txt - debloat ROM AOSP / AxionOS / GApps Android 16 (input debloat_aosp, default ON
+# untuk Port AOSP & Port AxionOS). Sumber: "Debloat Full AOSP A16 (11.1) - Recovery" (list.sh)
+# + tambahan aman (bagian bawah). Format sama dengan debloat_packages.txt:
+#   nama folder APK (boleh wildcard *, mis. SoundAmplifierPrebuilt* = semua versi), nama package,
+#   atau path. Yang tidak ada di ROM dilewati. Aplikasi inti (SystemUI, Settings, GMS, Play Store,
+#   WebView, Launcher, keyboard, IMS ...) selalu dilindungi port.sh.
+# Matikan per item lewat input debloat: !NamaFolder  (mis. !CalendarGooglePrebuilt)
+# HotwordEnrollment* otomatis dipertahankan kalau addon hotword (Hey Google) dipakai.
+# Tidak diambil dari zip itu: penghapusan SetupWizard (tanpa overlay provision bisa macet di
+# setup / tombol Home mati setelah Format Data) dan file kosmetik (ikon iOS, tema Gboard).
+
+# ---- dari Debloat Full AOSP A16 (11.1)
+talkback                                  | TalkBack (aksesibilitas)
+SoundAmplifierPrebuilt*                   | Sound Amplifier
+SwitchAccessPrebuilt*                     | Switch Access
+GoogleTTS                                 | Google Text-to-speech (suara navigasi Maps / baca layar ikut hilang)
+ScribePrebuilt*                           | Scribe
+SafetyHubPrebuilt                         | Safety Hub
+bcr                                       | Basic Call Recorder
+RecorderPrebuilt*                         | Google Recorder
+AndroidAutoStubPrebuilt                   | Android Auto (hapus = Android Auto tidak bisa dipakai)
+WellbeingPrebuilt                         | Digital Wellbeing
+PrintSpooler                              | layanan cetak
+Stk                                       | SIM Toolkit
+TagGoogle                                 | NFC tag viewer
+MusicFX                                   | equalizer AOSP
+BuiltInPrintService                       | default printing service
+HotwordEnrollmentYGoogleHEXAGON_WIDEBAND  | "Hey Google" (DSP)
+HotwordEnrollmentXGoogleHEXAGON_WIDEBAND  | "Hey Google" (DSP)
+Music                                     | pemutar musik AOSP
+BatteryStatsViewer                        | battery stats viewer
+BackupRestoreConfirmation                 | konfirmasi adb backup
+BasicDreams                               | screensaver dasar
+BookmarkProvider                          | bookmark provider lama
+CalendarGooglePrebuilt                    | Google Calendar
+CallLogBackup                             | backup log panggilan
+Chrome                                    | Chrome (pasang lagi dari Play Store)
+Chrome-Stub                               | Chrome stub
+EmergencyInfoGoogleNoUi                   | info darurat
+GoogleFeedback                            | Google Feedback
+KidsSupervisionStub                       | Family Link stub
+LiveWallpapersPicker                      | pemilih live wallpaper
+OmniJaws                                  | penyedia cuaca (widget/lockscreen cuaca ikut hilang)
+PartnerSetupPrebuilt                      | partner setup
+Photos                                    | Google Photos (pasang lagi dari Play Store)
+QuickAccessWallet                         | tile Wallet
+Seedvault                                 | backup Seedvault
+SoterService                              | Tencent Soter
+VoiceAccessPrebuilt*                      | Voice Access
+WAPPushManager                            | WAP push
+Updater                                   | Updater donor (OTA HP lain = brick)
+DeviceConnectivityServicePrebuilt*        | Device Connectivity Service
+Accord                                    | Accord
+MoseyApp                                  | Mosey
+TurboPrebuilt                             | Device Health Services (estimasi baterai)
+SearchSelectorPrebuilt                    | pilihan mesin pencari (EU)
+DevicePolicyPrebuilt*                     | Device Policy
+
+# ---- tambahan aman (bukan komponen sistem; bisa dipasang lagi dari Play Store)
+com.android.egg                           | easter egg
+com.android.traceur                       | System Tracing (developer)
+com.android.dreams.phototable             | screensaver foto
+com.google.android.apps.tachyon           | Google Meet
+com.google.android.apps.subscriptions.red | Google One
+com.google.android.apps.youtube.music     | YouTube Music
+com.google.android.videos                 | Google TV / Play Movies
+com.google.android.apps.books             | Google Play Books
+com.google.android.apps.podcasts          | Google Podcasts
+com.google.android.apps.magazines         | Google News
+com.google.android.music                  | Play Music lama
+com.google.ar.lens                        | Google Lens (app terpisah; Lens di Google app tetap ada)
+com.google.android.apps.youtube.kids      | YouTube Kids
+com.google.android.apps.googleassistant   | shortcut Assistant (Assistant di Google app tetap ada)
+com.google.android.apps.accessibility.voiceaccess | Voice Access (nama package)
+com.google.android.accessibility.soundamplifier   | Sound Amplifier (nama package)
+com.google.android.accessibility.switchaccess     | Switch Access (nama package)
+com.google.android.apps.recorder          | Google Recorder (nama package)

@@ -185,7 +185,8 @@ images/super.img.zst            super (system/system_ext/product donor + vendor/
 | `super_size` | `9126805504` (super ingres). Cek di HP: `su -c blockdev --getsize64 /dev/block/by-name/super` |
 | `package_type` | `ota` (default, zip payload.bin seperti ROM AOSP) atau `recovery` (images + super.img.zst, ditulis dd) |
 | `ext4_partitions` | `vendor odm system vendor_dlkm product system_ext` (bisa diedit langsung di HP). Kalau super tidak muat, partisi EXT4 terbesar otomatis jadi EROFS. `vendor_dlkm` dipakai apa adanya dari base (read-only) |
-| `debloat` | path/package tambahan, pisah spasi. Boleh kosong |
+| `debloat` | path/package/nama folder tambahan, pisah spasi (nama folder boleh wildcard, mis. `Foo*`). Awalan `!` = pertahankan. Boleh kosong |
+| `debloat_aosp` | `true` di Port AOSP & Port AxionOS (`false` di Port ColorOS). Pakai `debloat_aosp.txt`: daftar *Debloat Full AOSP A16 (11.1)* (TalkBack, Chrome, Photos, Calendar, Android Auto, Wellbeing, Recorder, OmniJaws, Google TTS, Stk, Print, Seedvault, ...) + tambahan aman (Meet, Google One, YouTube Music, Play Books/Movies, Lens, easter egg, tracing). Nama folder berversi dicocokkan dengan wildcard (`SoundAmplifierPrebuilt*`). `HotwordEnrollment*` dipertahankan kalau addon `hotword` dipakai; aplikasi inti (SystemUI, Settings, GMS, Play Store, WebView, launcher, keyboard) selalu dilindungi. Penghapusan SetupWizard dari zip aslinya **tidak** diambil (bisa macet di setup setelah Format Data). Batalkan per item: `debloat: !CalendarGooglePrebuilt` |
 | `copy_from_base` | path dari base yang ikut disalin, mis. `product/overlay/FooIngres.apk`. APK `sharedUserId=android.uid.system` dilewati (beda kunci platform). priv-app: allowlist izin base + semua izin yang diminta APK ditulis ulang (APK base bertanda tangan platform base, di donor izinnya lewat jalur privileged) |
 | `base_extras` | `true` = GameKeys (tombol bahu) + Leds (LED RGB) + Aperture (kamera) dari base LineageOS |
 | `dolby_ui` | `lunaris` (default) / `dax`. Lihat addon Dolby di atas |
@@ -325,6 +326,7 @@ scripts/build_rro.sh                     build RRO dari rro/ -> devices/ingres/p
 rro/                                     sumber RRO ingres (res/ + manifest, dari device tree)
 scripts/update-binary.in                 installer recovery
 debloat_packages.txt                     daftar debloat
+debloat_aosp.txt                         debloat Full AOSP A16 + tambahan aman (input debloat_aosp)
 devices/ingres/                          file khusus ingres
 ```
 

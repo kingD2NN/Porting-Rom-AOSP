@@ -99,6 +99,7 @@ KEEP_DOWNLOADS=${KEEP_DOWNLOADS:-false}
 DEBLOAT_PACKAGES_FILE=${DEBLOAT_PACKAGES_FILE:-}   # default: <repo>/debloat_packages.txt
 DEBLOAT_PRESET=${DEBLOAT_PRESET:-none}     # none | safe (= + hapus semua data-app)
 DEBLOAT_SAFE_KEEP=${DEBLOAT_SAFE_KEEP:-""}  # folder data-app yang tidak ikut dihapus preset safe
+DEBLOAT_AOSP=${DEBLOAT_AOSP:-false}        # true = + debloat_aosp.txt (Debloat Full AOSP A16 + tambahan aman)
 FIT_FALLBACK_EROFS=${FIT_FALLBACK_EROFS:-true}  # super tidak muat -> vendor/odm otomatis EROFS
 EXTRACT_EROFS=${EXTRACT_EROFS:-}           # opsional: extract.erofs versi baru (dicoba duluan)
 # partisi yang TIDAK PERNAH di-flash walau ada di ROM base (kalibrasi/IMEI/data user)
@@ -111,6 +112,7 @@ FIXED_TS=1230768000
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEVICE_FILES_DIR=${DEVICE_FILES_DIR:-$SCRIPT_DIR/../devices/$TARGET_DEVICE}
 DEBLOAT_PACKAGES_FILE=${DEBLOAT_PACKAGES_FILE:-$SCRIPT_DIR/../debloat_packages.txt}
+DEBLOAT_AOSP_FILE=${DEBLOAT_AOSP_FILE:-$SCRIPT_DIR/../debloat_aosp.txt}
 BIN="$TOOLS_DIR/bin/Linux/x86_64"
 PYBIN="$TOOLS_DIR/bin"
 export PATH="$BIN:$PATH"
@@ -1239,7 +1241,9 @@ LineageSettingsProvider LineageParts"
 
 # token daftar debloat: pisah koma / baris / spasi; label setelah '|' atau '#' dibuang
 debloat_tokens() {
-    { if [[ -f $DEBLOAT_PACKAGES_FILE ]]; then cat "$DEBLOAT_PACKAGES_FILE"; fi; printf '\n%s\n' "$DEBLOAT"; } \
+    { if [[ -f $DEBLOAT_PACKAGES_FILE ]]; then cat "$DEBLOAT_PACKAGES_FILE"; fi
+      if is_true "$DEBLOAT_AOSP" && [[ -f $DEBLOAT_AOSP_FILE ]]; then printf '\n'; cat "$DEBLOAT_AOSP_FILE"; fi
+      printf '\n%s\n' "$DEBLOAT"; } \
         | sed -e 's/#.*//' | tr ',' '\n' | sed -e 's/|.*//' | tr -s '[:space:]' '\n' | grep -v '^$' || true
 }
 
@@ -1260,8 +1264,16 @@ is_kept() { # nilai... -> 0 kalau salah satu ada di keep list / proteksi bawaan
 debloat_packages() {
     local toks pkgs apps idx="$WORK/apk_index.tsv" pkg app dir d sz freed=0 hit=0 miss=""
     toks=$(debloat_tokens | grep -v '^!' || true)
+    if is_true "$DEBLOAT_AOSP"; then log "debloat: + daftar $(basename "$DEBLOAT_AOSP_FILE") (DEBLOAT_AOSP=true)"; fi
+    # addon hotword diminta -> app "Hey Google" jangan ikut di-debloat
+    if [[ " ${ADDONS,,} " =~ \ (hotword|ok-google|hey-google)\  ]] && grep -qiE '^(HotwordEnrollment|com\.android\.hotwordenrollment)' <<< "$toks"; then
+        log "debloat: HotwordEnrollment* dipertahankan (addon hotword / Hey Google dipakai)"
+        toks=$(grep -viE '^(HotwordEnrollment|com\.android\.hotwordenrollment)' <<< "$toks" || true)
+    fi
     pkgs=$(grep -E '^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$' <<< "$toks" | sort -u | tr '\n' ' ' || true)
-    apps=$(grep -E '^[A-Za-z][A-Za-z0-9_-]*$' <<< "$toks" | sort -u | tr '\n' ' ' || true)
+    # nama folder APK: huruf/angka/_/-/. (versi, mis. Foo_v4.8.1) dan wildcard * (Foo* = semua versi)
+    apps=$(grep -vE '^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$' <<< "$toks" | grep -E '^[A-Za-z][A-Za-z0-9_.*-]*$' \
+           | sort -u | tr '\n' ' ' || true)
     [[ -n ${pkgs// /}${apps// /} ]] || return 0
     log "debloat: $(wc -w <<< "$pkgs") nama package + $(wc -w <<< "$apps") nama folder APK"
 
@@ -1280,10 +1292,16 @@ debloat_packages() {
     fi
 
     # --- nama folder APK (di app/, priv-app/, data-app/ semua partisi port)
+    local -
+    set -f   # wildcard di nama folder untuk find, bukan untuk shell
     for app in $apps; do
         if is_kept "$app"; then log "debloat: $app dipertahankan (keep/dilindungi)"; continue; fi
         local found=0
         while IFS= read -r -d '' d; do
+            [[ -d $d ]] || continue   # sudah terhapus lewat nama package / pola lain
+            if is_kept "$(basename "$d")" "${d#"$P_FS"/}"; then
+                log "debloat: ${d#"$P_FS"/} dipertahankan (keep/dilindungi, cocok pola $app)"; found=1; continue
+            fi
             sz=$(du -sb "$d" | cut -f1); freed=$(( freed + sz )); hit=$((hit + 1)); found=1
             rm -rf "$d"
             ok "debloat: $app -> ${d#"$P_FS"/} ($(( sz / 1048576 )) MB)"

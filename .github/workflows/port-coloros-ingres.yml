@@ -54,6 +54,11 @@ on:
         required: false
         default: ""
         type: string
+      debloat_aosp:
+        description: "Juga pakai debloat_aosp.txt (Debloat Full AOSP A16: app Google/AOSP opsional). ColorOS sudah punya debloat_oplus.txt"
+        required: false
+        default: false
+        type: boolean
       base_extras:
         description: "Salin fitur LineageOS ingres dari base: Aperture (kamera, pengganti kamera OnePlus) + GameKeys (tombol bahu) + Leds (LED RGB). Hanya untuk base LineageOS"
         required: false
@@ -139,6 +144,7 @@ jobs:
       super_size: ${{ inputs.super_size }}
       ext4_partitions: ${{ inputs.ext4_partitions }}
       debloat: ${{ inputs.debloat }}
+      debloat_aosp: ${{ inputs.debloat_aosp }}
       oplus_debloat: ${{ inputs.oplus_debloat }}
       maintainer: ${{ inputs.maintainer }}
       boot_img_url: ${{ inputs.boot_img_url }}

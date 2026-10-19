@@ -61,6 +61,11 @@ on:
         required: false
         default: ""
         type: string
+      debloat_aosp:
+        description: "Debloat Full AOSP A16 (debloat_aosp.txt): TalkBack, Chrome, Photos, Calendar, Android Auto, Wellbeing, Recorder, OmniJaws, Meet, YouTube Music, dll. Batalkan per item lewat debloat: !NamaFolder"
+        required: false
+        default: true
+        type: boolean
       base_extras:
         description: "Salin dari base LineageOS: GameKeys (tombol bahu) + Leds (LED RGB) + Aperture (kamera cadangan)"
         required: false
@@ -139,6 +144,7 @@ jobs:
       super_size: ${{ inputs.super_size }}
       ext4_partitions: "vendor odm system vendor_dlkm product system_ext"
       debloat: ${{ inputs.debloat }}
+      debloat_aosp: ${{ inputs.debloat_aosp }}
       copy_from_base: ""
       base_extras: ${{ inputs.base_extras }}
       addons: ${{ inputs.addons }}

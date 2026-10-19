@@ -34,6 +34,11 @@ on:
         required: false
         default: ""
         type: string
+      debloat_aosp:
+        description: "Debloat Full AOSP A16 (debloat_aosp.txt): TalkBack, Chrome, Photos, Calendar, Android Auto, Wellbeing, Recorder, OmniJaws, Meet, YouTube Music, dll. Batalkan per item lewat debloat: !NamaFolder"
+        required: false
+        default: true
+        type: boolean
       copy_from_base:
         description: "Opsional: path dari ROM base yang ikut disalin, pisah spasi (mis. product/overlay/FooIngres.apk)"
         required: false
@@ -126,6 +131,7 @@ on:
       super_size: { type: string, required: false, default: "9126805504" }
       ext4_partitions: { type: string, required: false, default: "vendor odm system vendor_dlkm product system_ext" }
       debloat: { type: string, required: false, default: "" }
+      debloat_aosp: { type: boolean, required: false, default: true }
       copy_from_base: { type: string, required: false, default: "" }
       base_extras: { type: boolean, required: false, default: true }
       addons: { type: string, required: false, default: "miuicamera dolby touchrate wfd hotword" }
@@ -328,6 +334,7 @@ jobs:
           SUPER_SIZE: ${{ inputs.super_size }}
           EXT4_PARTITIONS: ${{ inputs.ext4_partitions }}
           DEBLOAT: ${{ inputs.debloat }}
+          DEBLOAT_AOSP: ${{ inputs.debloat_aosp == false && 'false' || 'true' }}
           COPY_FROM_BASE: ${{ inputs.copy_from_base }}
           BASE_EXTRAS: ${{ inputs.base_extras }}
           ADDONS: ${{ inputs.addons }}
