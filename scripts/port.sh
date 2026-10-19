@@ -27,6 +27,7 @@ DISABLE_AVB=${DISABLE_AVB:-true}
 DEBUG_ADB=${DEBUG_ADB:-false}
 SEPOL_BRIDGE=${SEPOL_BRIDGE:-true}         # type public system_ext/product base yang dipakai vendor tapi tidak ada di donor -> dijembatani
 RELEASE_KEYS=${RELEASE_KEYS:-true}         # samarkan build donor userdebug/test-keys jadi user/release-keys (bank, Play Integrity basic)
+STOCK_FINGERPRINT=${STOCK_FINGERPRINT:-auto}   # Sidik jari: auto = fingerprint firmware stok ingres (vendor base) | donor | <fingerprint>
 SUPER_SIZE=${SUPER_SIZE:-auto}
 BASE_TYPE=${BASE_TYPE:-auto}                # auto | aosp (ROM AOSP ingres) | hyperos (stock MIUI/HyperOS ingres)
 # yang diambil dari base ke partisi port:
@@ -2156,6 +2157,7 @@ main() {
     oplus_patch
     props_effective
     spoof_release_keys
+    stock_fingerprint
     sepol_bridge
     if is_true "$OVERLAY_FIX"; then fix_overlays "$donor"; fi
     report_app_sizes

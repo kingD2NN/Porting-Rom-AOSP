@@ -92,6 +92,11 @@ on:
         required: false
         default: true
         type: boolean
+      fingerprint:
+        description: "Sidik jari (Tentang ponsel): auto = fingerprint firmware stok ingres dari vendor base (mis. Redmi/ingres/ingres:14/UKQ1.240624.001/OS2.0.5.0.ULJCNXM:user/release-keys) seperti ROM asli | donor = fingerprint ROM donor | atau tulis fingerprint lengkap"
+        required: false
+        default: auto
+        type: string
       sepolicy_strict:
         description: "Build GAGAL kalau sepolicy gabungan (system donor + vendor ingres) tidak bisa di-compile"
         required: false
@@ -132,6 +137,7 @@ on:
       rw_mount: { type: boolean, required: false, default: true }
       debug_adb: { type: boolean, required: false, default: false }
       release_keys: { type: boolean, required: false, default: true }
+      fingerprint: { type: string, required: false, default: auto }
       sepolicy_strict: { type: boolean, required: false, default: true }
       recovery_img_url: { type: string, required: false, default: "https://github.com/kingD2N/ALL-PROJECT-D2N/releases/download/ingres/TWRP_PROJECT_recovery_A16_A17_.img" }
       release_repo: { type: string, required: false, default: "" }
@@ -340,6 +346,7 @@ jobs:
           OPLUS_ROM_NAME: ${{ inputs.oplus_rom_name || 'auto' }}
           OPLUS_DEBLOAT: ${{ inputs.oplus_debloat == false && 'false' || 'true' }}
           RELEASE_KEYS: ${{ inputs.release_keys == false && 'false' || 'true' }}
+          STOCK_FINGERPRINT: ${{ inputs.fingerprint || 'auto' }}
           GPU_DRIVER_URL: ${{ inputs.gpu_driver_url }}
           GPU_RENDERENGINE: ${{ inputs.gpu_renderengine || 'skiaglthreaded' }}
         run: |
@@ -436,6 +443,7 @@ jobs:
           RW_MOUNT: ${{ inputs.rw_mount }}
           DEBUG_ADB: ${{ inputs.debug_adb }}
           RELEASE_KEYS_IN: ${{ inputs.release_keys == false && 'false' || 'true' }}
+          FINGERPRINT_IN: ${{ inputs.fingerprint || 'auto' }}
           BOOT: ${{ steps.port.outputs.boot_used || inputs.boot_img_url }}
           PKG: ${{ inputs.package_type }}
           ADDONS_IN: ${{ inputs.addons }}
@@ -457,6 +465,7 @@ jobs:
             echo "| RW | ${RW_MOUNT} |"
             echo "| Debug ADB | ${DEBUG_ADB} |"
             echo "| user/release-keys | ${RELEASE_KEYS_IN} |"
+            echo "| Sidik jari | ${FINGERPRINT_IN} |"
             echo "| Paket | ${PKG:-ota} |"
             echo "| Addons diminta | ${ADDONS_IN:-none} |"
             echo "| Addons terpasang | ${ADDONS_DONE:-?} |"

@@ -587,6 +587,46 @@ spoof_release_keys() {
     fi
 }
 
+# ------------------------------------------------------------------ fingerprint stok
+# Settings > Tentang ponsel > "Sidik jari" = ro.build.fingerprint. ROM port membawa fingerprint
+# donor (HP lain, mis. POCO/marble_global/marble:15/...). STOCK_FINGERPRINT:
+#   auto  (default) fingerprint firmware stok ingres = ro.vendor.build.fingerprint vendor base
+#         (mis. Redmi/ingres/ingres:14/UKQ1.240624.001/OS2.0.5.0.ULJCNXM:user/release-keys),
+#         seperti ROM asli / LineageOS ingres
+#   donor fingerprint ROM donor dibiarkan
+#   <fingerprint lengkap>  dipakai apa adanya
+# Ditulis ke ro.build/system/system_ext/product.build.fingerprint (+ description) semua build.prop
+# port; ro.build.fingerprint juga dipastikan ada di product (dimuat init paling akhir).
+stock_fingerprint() {
+    local fp src dev files=() f res
+    case ${STOCK_FINGERPRINT,,} in
+        donor|off|false|none|"")
+            log "fingerprint: dibiarkan fingerprint ROM donor ($(get_prop "$P_FS/system/system/build.prop" ro.system.build.fingerprint))"
+            return 0 ;;
+        auto)
+            fp=$(get_prop "$B_FS/vendor/build.prop" ro.vendor.build.fingerprint); src="vendor base"
+            if [[ -z $fp ]]; then fp=$(get_prop "$B_FS/odm/etc/build.prop" ro.odm.build.fingerprint); src="odm base"; fi ;;
+        *)  fp=$STOCK_FINGERPRINT; src="input" ;;
+    esac
+    if [[ -z $fp ]]; then warn "fingerprint: fingerprint stok tidak ditemukan di vendor/odm base, fingerprint donor dipakai"; return 0; fi
+    dev=${fp%%:*}; dev=${dev##*/}
+    if [[ ${STOCK_FINGERPRINT,,} == auto && $dev != "$TARGET_DEVICE" ]]; then
+        warn "fingerprint: fingerprint $src untuk device '$dev', bukan $TARGET_DEVICE -> fingerprint donor dipakai ($fp)"
+        return 0
+    fi
+    if is_true "$RELEASE_KEYS"; then
+        fp=$(sed -E 's#:(userdebug|eng)/#:user/#; s#/(test|dev)-keys$#/release-keys#' <<< "$fp")
+    fi
+    while IFS= read -r -d '' f; do files+=("$f"); done < <(
+        find "$P_FS" -type f \( -name build.prop -o -name default.prop -o -name prop.default \) -print0 2>/dev/null)
+    [[ -f $P_FS/product/etc/build.prop ]] || { warn "fingerprint: product/etc/build.prop tidak ada"; return 0; }
+    if ! res=$(python3 "$SCRIPT_DIR/stock_fingerprint.py" "$fp" --set "$P_FS/product/etc/build.prop" --files "${files[@]}"); then
+        warn "fingerprint: format fingerprint tidak valid, fingerprint donor dipakai: $fp"
+        return 0
+    fi
+    ok "fingerprint: Sidik jari = $fp ($src, $(sed -n 's/^TOTAL //p' <<< "$res") prop)"
+}
+
 # ------------------------------------------------------------------ jembatan sepolicy
 # Vendor merujuk type public platform lewat atribut ber-versi (X_<ver>) yang diisi file mapping
 # system/system_ext/product. Donor beda basis dengan base (OxygenOS / AOSP murni di atas vendor

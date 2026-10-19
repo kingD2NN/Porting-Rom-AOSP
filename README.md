@@ -197,6 +197,7 @@ images/super.img.zst            super (system/system_ext/product donor + vendor/
 | `rw_mount` | `true` (hanya partisi EXT4 yang dibangun ulang: system, system_ext, product, vendor, odm. `vendor_dlkm` dari base tetap read-only) |
 | `debug_adb` | `false` (default). `true` hanya untuk menyelidiki bootloop: adb + USB debugging hidup sejak boot tanpa konfirmasi (`ro.adb.secure=0`, `persist.sys.usb.config=mtp,adb`). Aplikasi bank / e-wallet (DANA, mobile banking) sering menolak jalan kalau USB debugging aktif |
 | `release_keys` | `true` (default). Build donor `userdebug`/`eng` + `test-keys`/`dev-keys` disamarkan jadi `user/release-keys` di semua build.prop port (system, system_ext, product, `/my_*` OPlus) dan vendor/odm base: `ro.build.type`, `ro.build.tags`, fingerprint, description, flavor, `ro.debuggable=0`, `ro.secure=1`, `ro.adb.secure=1` (`scripts/release_keys.py`). Untuk aplikasi bank/e-wallet & Play Integrity **basic** di ROM tanpa root. Tidak bisa membuat lolos *device*/*strong integrity* (butuh bootloader terkunci + fingerprint tersertifikasi; prop `ro.boot.*` dari bootloader tidak bisa diubah lewat build.prop). Kalau `debug_adb: true`, `ro.debuggable`/`ro.adb.secure` dibiarkan |
+| `fingerprint` | `auto` (default). **Sidik jari** di Tentang ponsel (`ro.build.fingerprint`) memakai fingerprint firmware stok ingres dari vendor base (`ro.vendor.build.fingerprint`, mis. `Redmi/ingres/ingres:14/UKQ1.240624.001/OS2.0.5.0.ULJCNXM:user/release-keys`) seperti ROM asli / LineageOS ingres, bukan fingerprint HP donor. Diterapkan ke `ro.build`/`ro.system`/`ro.system_ext`/`ro.product`(+`/my_*`)`.build.fingerprint` dan `ro.build.description` (`scripts/stock_fingerprint.py`); `ro.vendor.*`/`ro.odm.*` tidak diubah. `donor` = biarkan fingerprint ROM donor, atau isi fingerprint lengkap sendiri |
 | `sepolicy_strict` | `true` (default) = build gagal kalau sepolicy gabungan error (pasti bootloop); `false` = cuma warning |
 | `recovery_img_url` | default TWRP D2N (`ALL-PROJECT-D2N` release `ingres`, `TWRP_PROJECT_recovery_A16_A17_.img`). Dicek: image boot Android dan tidak lebih besar dari partisi recovery. Kosongkan = recovery HP tidak disentuh |
 | `release_repo` | kosong = Artifacts. `owner/repo` = GitHub Release (secret `RELEASE_TOKEN`) |
@@ -314,6 +315,7 @@ scripts/vintf_relax.py                   jadikan optional HAL framework yang tid
 overlays/<rom>/                          RRO branding khusus ROM (dibangun saat port, apktool)
 patches/gamekeys/                        PortTaskCompat.smali (GameKeys tanpa kunci platform donor)
 scripts/release_keys.py                  samarkan build userdebug/test-keys -> user/release-keys
+scripts/stock_fingerprint.py             Sidik jari = fingerprint firmware stok ingres (vendor base)
 scripts/rom_branding.py                  maintainer & OFFICIAL -> UNOFFICIAL di build.prop donor
 scripts/kernel_crc.py                    CRC simbol kernel (kallsyms) vs modul vendor base (__versions), ekstrak modul vendor_boot
 scripts/rc_imports.py                    cek import rc system yang bergantung prop (ro.zygote, ro.mediaserver.64b.enable)

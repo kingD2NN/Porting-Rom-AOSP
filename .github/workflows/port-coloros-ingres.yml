@@ -99,6 +99,11 @@ on:
         required: false
         default: true
         type: boolean
+      fingerprint:
+        description: "Sidik jari (Tentang ponsel): auto = fingerprint firmware stok ingres dari vendor base (mis. Redmi/ingres/ingres:14/UKQ1.240624.001/OS2.0.5.0.ULJCNXM:user/release-keys) seperti ROM asli | donor = fingerprint ROM donor | atau tulis fingerprint lengkap"
+        required: false
+        default: auto
+        type: string
       sepolicy_strict:
         description: "Build GAGAL kalau sepolicy gabungan (system OPlus + vendor Xiaomi) tidak bisa di-compile"
         required: false
@@ -141,6 +146,7 @@ jobs:
       rw_mount: false
       debug_adb: ${{ inputs.debug_adb }}
       release_keys: ${{ inputs.release_keys }}
+      fingerprint: ${{ inputs.fingerprint }}
       sepolicy_strict: ${{ inputs.sepolicy_strict }}
       recovery_img_url: ${{ inputs.recovery_img_url }}
       release_repo: ${{ inputs.release_repo }}
