@@ -167,15 +167,38 @@ source "$SCRIPT_DIR/oplus_port.sh"
 # unduh langsung lewat dl_helper.py. Hasil download yang ternyata HTML ditolak dengan alasan jelas.
 dl_tool() { python3 "$SCRIPT_DIR/dl_helper.py" "$@"; }
 
-dl_curl() { # url out
-    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 \
+dl_curl() { # url out   (DL_COOKIE: header Cookie tambahan, mis. akun tamu Gofile)
+    local hdr=()
+    if [[ -n ${DL_COOKIE:-} ]]; then hdr=(-H "Cookie: $DL_COOKIE"); fi
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 "${hdr[@]}" \
          -A "${DL_UA:-Wget/1.21.4}" -c "$WORK/cookies.txt" -b "$WORK/cookies.txt" -o "$2" "$1" >&2
 }
+
+# Gofile: link halaman (gofile.io/d/<kode>) maupun link file (<server>.gofile.io/download/web/...)
+# hanya memberi file kalau request membawa cookie accountToken akun Gofile; tanpa itu -> halaman
+# HTML. dl_helper.py gofile membuat akun tamu (atau pakai env GOFILE_TOKEN) dan mencari link file.
+# Hasil di-cache per URL supaya cek URL dan download memakai akun yang sama.
+gofile_prep() { # src -> GF_URL GF_COOKIE GF_UA GF_NAME (gagal: GF_ERR, return 1)
+    local src=$1 c
+    c="$WORK/gofile_$(printf %s "$src" | md5sum | cut -c1-12).txt"
+    if [[ ! -s $c ]]; then
+        if ! dl_tool gofile "$src" > "$c.tmp" 2> "$c.err"; then
+            GF_ERR=$(tr '\n' ' ' < "$c.err"); rm -f "$c.tmp"
+            return 1
+        fi
+        mv "$c.tmp" "$c"
+    fi
+    GF_URL=$(sed -n 's/^link=//p' "$c"); GF_COOKIE=$(sed -n 's/^cookie=//p' "$c")
+    GF_UA=$(sed -n 's/^ua=//p' "$c"); GF_NAME=$(sed -n 's/^name=//p' "$c")
+    [[ -n $GF_URL && -n $GF_COOKIE ]] || { GF_ERR="hasil dl_helper.py gofile kosong"; return 1; }
+}
+GOFILE_HINT="Gofile: file akun gratis bisa terhapus / link file kedaluwarsa. Pakai link halaman gofile.io/d/<kode> (bukan link tombol download), atau isi secret GOFILE_TOKEN dengan token akun Gofile sendiri, atau unggah ROM ke GitHub Release / Google Drive / SourceForge"
 
 dl_raw() { # url out
     # aria2c multi-koneksi untuk host biasa; kalau gagal (mirror menolak multi-koneksi / UA aria2,
     # mis. SourceForge "ERR 0B/s") otomatis diulang pakai curl satu koneksi.
-    # Google Drive & MediaFire selalu curl (butuh cookie + halaman konfirmasi).
+    # Google Drive & MediaFire selalu curl (butuh cookie + halaman konfirmasi), Gofile juga
+    # (satu koneksi: banyak koneksi paralel akun tamu bisa kena blokir IP sementara).
     local url=$1 out=$2 h final
     h=$(dl_tool host "$url")
     rm -f "$out" "$out.aria2"
@@ -187,7 +210,7 @@ dl_raw() { # url out
             url=$final
         fi
     fi
-    if command -v aria2c >/dev/null && [[ $h != gdrive && $h != mediafire ]]; then
+    if command -v aria2c >/dev/null && [[ $h != gdrive && $h != mediafire && $h != gofile ]]; then
         if aria2c -x8 -s8 -k1M --file-allocation=none --console-log-level=warn --allow-overwrite=true \
                --max-tries=5 --retry-wait=5 -U "${DL_UA:-Wget/1.21.4}" \
                --summary-interval=60 -d "$(dirname "$out")" -o "$(basename "$out")" "$url" >&2; then
@@ -209,7 +232,13 @@ fetch() { # src dest_dir name -> echo path
     mkdir -p "$dir"; out="$dir/$name"
     url=$(dl_tool normalize "$src"); h=$(dl_tool host "$src")
     log "download $name: $src" >&2
-    if [[ $url != "$src" ]]; then log "  link $h -> unduh langsung: $url" >&2; fi
+    local DL_UA=${DL_UA:-Wget/1.21.4} DL_COOKIE=${DL_COOKIE:-}
+    if [[ $h == gofile ]]; then
+        gofile_prep "$src" || die "download $name: link Gofile tidak bisa dipakai: $GF_ERR. $GOFILE_HINT"
+        url=$GF_URL DL_UA=$GF_UA DL_COOKIE=$GF_COOKIE
+        log "  gofile: ${GF_NAME:-file} (cookie akun Gofile)" >&2
+    fi
+    if [[ $url != "$src" && $h != gofile ]]; then log "  link $h -> unduh langsung: $url" >&2; fi
     for try in 1 2 3; do
         dl_raw "$url" "$out" || die "download $name gagal: $url"
         kind=$(dl_tool sniff "$out")
@@ -220,6 +249,7 @@ fetch() { # src dest_dir name -> echo path
             mediafire) next=$(dl_tool mediafire "$out" || true) ;;
         esac
         if [[ -z $next || $try -eq 3 ]]; then
+            if [[ $h == gofile ]]; then die "download $name: Gofile tetap mengirim halaman HTML walau pakai cookie akun. $GOFILE_HINT. URL: $src"; fi
             die "download $name menghasilkan halaman HTML, bukan file: $(dl_tool html-reason "$out"). URL: $src"
         fi
         log "  $h: halaman konfirmasi, lanjut ke $next" >&2
@@ -230,10 +260,16 @@ fetch() { # src dest_dir name -> echo path
 }
 
 check_url() { # label url  (cek cepat: bisa diakses + bukan halaman HTML, sebelum download besar)
-    local label=$1 src=$2 url h code tmp kind name
+    local label=$1 src=$2 url h code tmp kind name ua=${DL_UA:-Wget/1.21.4} hdr=()
     [[ $src =~ ^https?:// ]] || return 0
     url=$(dl_tool normalize "$src"); h=$(dl_tool host "$src")
     name=${src%%\?*}; name=${name##*/}
+    if [[ $h == gofile ]]; then
+        gofile_prep "$src" || die "$label: link Gofile tidak bisa dipakai: $GF_ERR. $GOFILE_HINT"
+        url=$GF_URL ua=$GF_UA name=${GF_NAME:-$name}
+        hdr=(-H "Cookie: $GF_COOKIE")
+        log "$label: link Gofile -> ${GF_NAME:-file} (cookie akun $([[ -n ${GOFILE_TOKEN:-} ]] && echo sendiri || echo tamu))"
+    fi
     # link bertanda tangan sementara (mis. tombol download AfterLife = DigitalOcean Spaces, berlaku
     # 1 jam): cek masa berlakunya dulu supaya pesan error jelas dan tidak gagal di tengah download
     local sg left until valid
@@ -249,12 +285,13 @@ check_url() { # label url  (cek cepat: bisa diakses + bukan halaman HTML, sebelu
     tmp="$WORK/check_$label.bin"
     # cuma 512 byte pertama: head menutup pipe, jadi server yang mengabaikan Range tidak
     # membuat file ROM penuh ikut terunduh di sini. Kode HTTP dibaca dari header (redirect terakhir).
-    curl -sL -r 0-511 --retry 2 --connect-timeout 30 --max-time 120 -A "${DL_UA:-Wget/1.21.4}" \
+    curl -sL -r 0-511 --retry 2 --connect-timeout 30 --max-time 120 -A "$ua" "${hdr[@]}" \
          -D "$tmp.hdr" "$url" 2>/dev/null | head -c 512 > "$tmp" || true
     code=$(grep -E '^HTTP/' "$tmp.hdr" 2>/dev/null | tail -n1 | awk '{print $2}' || true)
     code=${code:-000}; rm -f "$tmp.hdr"
     case $code in
         200|206) ;;
+        401|403|404) if [[ $h == gofile ]]; then die "$label: Gofile menolak (HTTP $code). $GOFILE_HINT. URL: $src"; fi ;;&
         404) die "$label: file tidak ditemukan (HTTP 404): $src" ;;
         403) die "$label: akses ditolak (HTTP 403). Link private / kedaluwarsa? $src" ;;
         *)   die "$label: URL tidak bisa diakses (HTTP $code): $src" ;;
@@ -263,6 +300,8 @@ check_url() { # label url  (cek cepat: bisa diakses + bukan halaman HTML, sebelu
     if [[ $kind == html ]]; then
         if [[ $h == gdrive || $h == mediafire ]]; then
             ok "$label: URL bisa diakses ($h, halaman konfirmasi akan dilewati saat download)"
+        elif [[ $h == gofile ]]; then
+            die "$label: Gofile tetap mengirim halaman HTML walau pakai cookie akun. $GOFILE_HINT. URL: $src"
         else
             die "$label: URL membalas halaman HTML, bukan file ($(dl_tool html-reason "$tmp")). Pakai link unduh langsung: $src"
         fi

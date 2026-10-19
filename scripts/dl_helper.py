@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
 dl_helper.py - bantu download ROM dari link "halaman web" (Google Drive, SourceForge,
-Pixeldrain, MediaFire) yang kalau diunduh mentah menghasilkan HTML, bukan file.
+Pixeldrain, MediaFire, Gofile) yang kalau diunduh mentah menghasilkan HTML, bukan file.
 
   dl_helper.py normalize <url>        -> URL unduh langsung (atau URL asal kalau tidak dikenal)
-  dl_helper.py host <url>             -> gdrive | sourceforge | pixeldrain | mediafire | other
+  dl_helper.py host <url>             -> gdrive | sourceforge | pixeldrain | mediafire | gofile | other
+  dl_helper.py gofile <url>           -> baris "link=", "cookie=", "ua=", "name=" untuk download Gofile
+                                         (akun tamu / env GOFILE_TOKEN); exit 1 + pesan di stderr kalau gagal
   dl_helper.py gdrive-form <html>     -> URL lanjutan dari halaman konfirmasi Google Drive
                                          ("can't scan for viruses"); exit 1 kalau tidak ada form
   dl_helper.py mediafire <html>       -> URL file asli dari halaman MediaFire; exit 1 kalau tidak ada
@@ -43,6 +45,8 @@ def host(url):
         return "pixeldrain"
     if "mediafire.com" in n:
         return "mediafire"
+    if n == "gofile.io" or n.endswith(".gofile.io"):
+        return "gofile"
     return "other"
 
 
@@ -123,6 +127,135 @@ def html_reason(page):
     return "server mengirim halaman HTML, bukan file ROM (link halaman web, bukan link unduh langsung)"
 
 
+# ------------------------------------------------------------------ gofile
+# Link Gofile (halaman gofile.io/d/<kode> maupun link file <server>.gofile.io/download/web/<id>/<nama>)
+# hanya memberi file kalau request membawa cookie accountToken=<token akun>. Tanpa cookie -> halaman
+# HTML. Token akun tamu dibuat lewat POST https://api.gofile.io/accounts (sama seperti situsnya).
+# Isi folder dibaca lewat /contents/<kode> dengan header X-Website-Token = sha256(UA::bahasa::token::
+# jendela_4_jam::salt) (algoritma gofile.io/dist/js/wt.obf.js, sama dengan gallery-dl). Salt bisa
+# diganti gofile sewaktu-waktu -> env GOFILE_SALT. Env GOFILE_TOKEN = token akun sendiri (premium).
+GOFILE_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+             "Chrome/138.0.0.0 Safari/537.36")
+GOFILE_SALT = "12af056dacea0b"
+
+
+def _gofile_api(path, token=None, method="GET", params=None, wt=None):
+    import json
+    import urllib.request
+    import os
+    url = (os.environ.get("GOFILE_API") or "https://api.gofile.io") + path   # GOFILE_API: untuk tes
+    if params:
+        url += "?" + urlencode(params)
+    h = {"User-Agent": GOFILE_UA, "Accept": "application/json", "Origin": "https://gofile.io",
+         "Referer": "https://gofile.io/"}
+    if token:
+        h["Authorization"] = "Bearer " + token
+        h["Cookie"] = "accountToken=" + token
+    if wt:
+        h["X-Website-Token"] = wt
+        h["X-BL"] = "en-US"
+    import time
+    res = {"status": "?"}
+    for attempt in range(4):
+        req = urllib.request.Request(url, data=b"" if method == "POST" else None, headers=h, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            try:
+                res = json.loads(e.read().decode("utf-8", "replace"))
+            except ValueError:
+                res = {"status": "http-%d" % e.code}
+            if e.code != 429 and e.code < 500:
+                return res
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            res = {"status": "jaringan: %s" % getattr(e, "reason", e)}
+        time.sleep(20 * (attempt + 1))   # 429 / 5xx / jaringan: tunggu lalu ulang
+    return res
+
+
+def _gofile_wt(token, now=None):
+    import hashlib
+    import os
+    import time
+    now = time.time() if now is None else now
+    salt = os.environ.get("GOFILE_SALT") or GOFILE_SALT
+    data = "%s::en-US::%s::%d::%s" % (GOFILE_UA, token, int(now / 14400), salt)
+    return hashlib.sha256(data.encode()).hexdigest()
+
+
+def gofile_parse(url):
+    """('folder', kode) | ('file', nama) | None"""
+    from urllib.parse import unquote
+    u = urlparse(url)
+    m = re.match(r"^/d/([A-Za-z0-9_-]+)", u.path)
+    if m:
+        return "folder", m.group(1)
+    m = re.match(r"^/download/(?:web|direct)/[0-9a-fA-F-]{8,}/(.+)$", u.path)
+    if m:
+        return "file", unquote(m.group(1))
+    return None
+
+
+def gofile_pick(children, want=None):
+    files = [c for c in children if c.get("type") == "file" and c.get("link")]
+    if want:
+        files = [c for c in files if c.get("name") == want] or files
+    if not files:
+        return None
+    rom = [c for c in files if re.search(r"\.(zip|tgz|tar\.(gz|xz|zst)|7z|bin|img)$", c.get("name", ""), re.I)]
+    return max(rom or files, key=lambda c: int(c.get("size") or 0))
+
+
+def gofile(url):
+    import os
+    kind = gofile_parse(url)
+    if not kind:
+        sys.stderr.write("link Gofile tidak dikenali (pakai gofile.io/d/<kode> atau link file "
+                         "<server>.gofile.io/download/web/<id>/<nama>)\n")
+        return 1
+    token = os.environ.get("GOFILE_TOKEN", "").strip()
+    if not token:
+        r = _gofile_api("/accounts", method="POST")
+        token = (r.get("data") or {}).get("token") if r.get("status") == "ok" else None
+        if not token:
+            sys.stderr.write("gagal membuat akun tamu Gofile (status: %s). Coba lagi nanti, atau isi "
+                             "secret GOFILE_TOKEN dengan token akun Gofile sendiri\n" % r.get("status"))
+            return 1
+    link, name = url, None
+    if kind[0] == "file":
+        name = kind[1]
+    else:
+        r = _gofile_api("/contents/" + kind[1], token=token, wt=_gofile_wt(token),
+                        params={"contentFilter": "", "page": "1", "pageSize": "1000",
+                                "sortField": "name", "sortDirection": "1"})
+        st = r.get("status")
+        if st != "ok":
+            why = {"error-notFound": "folder tidak ditemukan / sudah dihapus (file Gofile akun gratis "
+                                     "terhapus otomatis kalau lama tidak diunduh)",
+                   "error-passwordRequired": "folder Gofile dikunci password",
+                   "error-notPremium": "file ini hanya bisa diunduh akun premium Gofile (isi secret GOFILE_TOKEN)",
+                   "error-wrongToken": "website token Gofile ditolak (salt berubah? isi env GOFILE_SALT)",
+                   "error-rateLimit": "kena batas request Gofile, coba lagi beberapa menit lagi"}.get(st, st)
+            sys.stderr.write("Gofile /contents/%s: %s\n" % (kind[1], why))
+            return 1
+        d = r.get("data") or {}
+        ch = d.get("children") or {}
+        ch = list(ch.values()) if isinstance(ch, dict) else list(ch)
+        if d.get("type") == "file":
+            ch = [d]
+        f = gofile_pick(ch)
+        if not f:
+            sys.stderr.write("folder Gofile %s tidak berisi file\n" % kind[1])
+            return 1
+        link, name = f["link"], f.get("name")
+    print("link=" + link)
+    print("cookie=accountToken=" + token)
+    print("ua=" + GOFILE_UA)
+    print("name=" + (name or ""))
+    return 0
+
+
 def signed(url, now=None):
     """(sisa_detik, waktu_kedaluwarsa_UTC, masa_berlaku_detik) untuk presigned URL AWS SigV4, atau None"""
     import calendar
@@ -144,6 +277,8 @@ def main():
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
     cmd, arg = sys.argv[1], sys.argv[2]
+    if cmd == "gofile":
+        return gofile(arg)
     if cmd == "normalize":
         print(normalize(arg))
     elif cmd == "host":

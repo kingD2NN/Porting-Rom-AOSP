@@ -109,6 +109,7 @@ jobs:
           BASE: ${{ inputs.base_rom_url }}
           PORT: ${{ inputs.port_rom_url }}
           BOOT: ${{ inputs.boot_img_url }}
+          GOFILE_TOKEN: ${{ secrets.GOFILE_TOKEN }}
         run: |
           set -euo pipefail
           cd hyperos_port

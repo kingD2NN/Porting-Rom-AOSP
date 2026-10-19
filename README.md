@@ -181,7 +181,7 @@ images/super.img.zst            super (system/system_ext/product donor + vendor/
 | `release_repo` | kosong = Artifacts. `owner/repo` = GitHub Release (secret `RELEASE_TOKEN`) |
 | `gdrive_upload` | `true` = upload juga ke Google Drive lewat rclone (secret `RCLONE_CONFIG` = isi `rclone.conf`, folder di env `GDRIVE_REMOTE`) |
 
-Link ROM yang didukung: link unduh langsung (GitHub release, server sendiri), **Google Drive** (link `.../file/d/<id>/view` boleh langsung ditempel; file harus *Anyone with the link*), **SourceForge** (link `downloads.sourceforge.net/...?ts=...` yang kedaluwarsa otomatis diubah ke link `/download` yang stabil), **Pixeldrain** (`/u/<id>`), dan **MediaFire**. Sebelum download besar, isi URL dicek: kalau server membalas halaman HTML (link salah, private, kuota Drive habis), build langsung berhenti dengan alasannya.
+Link ROM yang didukung: link unduh langsung (GitHub release, server sendiri), **Google Drive** (link `.../file/d/<id>/view` boleh langsung ditempel; file harus *Anyone with the link*), **SourceForge** (link `downloads.sourceforge.net/...?ts=...` yang kedaluwarsa otomatis diubah ke link `/download` yang stabil), **Pixeldrain** (`/u/<id>`), **MediaFire**, dan **Gofile** (link halaman `gofile.io/d/<kode>` atau link file `<server>.gofile.io/download/web/...`; diunduh dengan cookie akun tamu Gofile yang dibuat otomatis, atau token akun sendiri lewat secret opsional `GOFILE_TOKEN`. Link halaman `/d/<kode>` lebih awet daripada link tombol download). Sebelum download besar, isi URL dicek: kalau server membalas halaman HTML (link salah, private, kuota Drive habis), build langsung berhenti dengan alasannya.
 
 4. Ambil zip dari **Artifacts** (atau Release / Google Drive).
 
@@ -288,7 +288,7 @@ scripts/rom_branding.py                  maintainer & OFFICIAL -> UNOFFICIAL di 
 scripts/kernel_crc.py                    CRC simbol kernel (kallsyms) vs modul vendor base (__versions), ekstrak modul vendor_boot
 scripts/rc_imports.py                    cek import rc system yang bergantung prop (ro.zygote, ro.mediaserver.64b.enable)
 scripts/rc_disable32.py                  nonaktifkan service rc vendor/odm yang binary-nya 32-bit (donor 64-bit only)
-scripts/dl_helper.py                     link Google Drive/SourceForge/Pixeldrain/MediaFire -> unduh langsung, tolak HTML
+scripts/dl_helper.py                     link Google Drive/SourceForge/Pixeldrain/MediaFire/Gofile -> unduh langsung, tolak HTML
 scripts/build_rro.sh                     build RRO dari rro/ -> devices/ingres/product/overlay/
 rro/                                     sumber RRO ingres (res/ + manifest, dari device tree)
 scripts/update-binary.in                 installer recovery

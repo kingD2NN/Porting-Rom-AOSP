@@ -143,6 +143,7 @@ on:
     secrets:
       RELEASE_TOKEN: { required: false }
       RCLONE_CONFIG: { required: false }
+      GOFILE_TOKEN: { required: false }
 
 permissions:
   contents: read
@@ -313,6 +314,7 @@ jobs:
         env:
           BASE_ROM: ${{ inputs.base_rom_url }}
           PORT_ROM: ${{ inputs.port_rom_url }}
+          GOFILE_TOKEN: ${{ secrets.GOFILE_TOKEN }}
           SUPER_SIZE: ${{ inputs.super_size }}
           EXT4_PARTITIONS: ${{ inputs.ext4_partitions }}
           DEBLOAT: ${{ inputs.debloat }}

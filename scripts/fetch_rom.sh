@@ -1,7 +1,8 @@
 #!/bin/bash
 # fetch_rom.sh URL DIR -> unduh ROM ke DIR dengan nama file asli, cetak path-nya di stdout.
 # Link "halaman web" (Google Drive, SourceForge, Pixeldrain, MediaFire) diubah ke link unduh
-# langsung (scripts/dl_helper.py); halaman konfirmasi Google Drive / MediaFire dilewati; hasil
+# langsung (scripts/dl_helper.py); halaman konfirmasi Google Drive / MediaFire dilewati; link
+# Gofile diunduh dengan cookie akun tamu (atau env GOFILE_TOKEN); hasil
 # berupa halaman HTML = gagal. Nama file diambil dari Content-Disposition (Google Drive memberi
 # nama asli, mis. RYUUI_INGRES_V14.0.11.0.TLJCNXM_EU261003.zip), kalau tidak ada dari URL.
 set -euo pipefail
@@ -13,11 +14,21 @@ mkdir -p "$dir"
 jar="$dir/.cookies.txt"
 h=$(dl host "$url")
 u=$(dl normalize "$url")
+hdr=()
+gfname=""
+if [[ $h == gofile ]]; then
+    gf=$(dl gofile "$url") || { echo "::error::link Gofile tidak bisa dipakai. Pakai link halaman gofile.io/d/<kode>, isi secret GOFILE_TOKEN, atau unggah ke host lain. URL: $url" >&2; exit 1; }
+    u=$(sed -n 's/^link=//p' <<< "$gf")
+    UA=$(sed -n 's/^ua=//p' <<< "$gf")
+    gfname=$(sed -n 's/^name=//p' <<< "$gf")
+    hdr=(-H "Cookie: $(sed -n 's/^cookie=//p' <<< "$gf")")
+fi
 
-name=$(curl -sSIL --max-time 120 -A "$UA" -c "$jar" -b "$jar" "$u" 2>/dev/null \
+name=$(curl -sSIL --max-time 120 -A "$UA" "${hdr[@]}" -c "$jar" -b "$jar" "$u" 2>/dev/null \
        | tr -d '\r' | grep -i '^content-disposition:' | tail -n1 \
        | sed -nE "s/.*filename\*=UTF-8''([^;]+).*/\1/ip; t; s/.*filename=\"?([^\";]+)\"?.*/\1/ip" || true)
 name=$(python3 -c 'import sys,urllib.parse as u; print(u.unquote(sys.argv[1]))' "${name:-}")
+name=${name:-$gfname}
 if [[ -z $name ]]; then
     name=$(basename "${url%%\?*}")
     case $name in download|view|uc|""|*=*) name=rom.zip ;; esac
@@ -28,12 +39,12 @@ echo "unduh $name ($h)" >&2
 
 get() { # url
     rm -f "$out" "$out.aria2"
-    if [[ $h != gdrive && $h != mediafire ]] && command -v aria2c >/dev/null \
+    if [[ $h != gdrive && $h != mediafire && $h != gofile ]] && command -v aria2c >/dev/null \
         && aria2c -x8 -s8 -k1M --file-allocation=none --console-log-level=warn --summary-interval=60 \
                   --allow-overwrite=true -U "$UA" -d "$dir" -o "$name" "$1" >&2; then
         return 0
     fi
-    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 -A "$UA" \
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 -A "$UA" "${hdr[@]}" \
          -c "$jar" -b "$jar" -o "$out" "$1" >&2
 }
 
