@@ -161,13 +161,18 @@ META-INF/port_info.txt          ringkasan build port
 - **recovery**: default TWRP D2N ikut di payload dan ditulis ke slot tujuan, jadi sesudah pindah slot HP tetap punya TWRP. Kalau `recovery_img_url` dikosongkan, recovery tidak ikut; pastikan recovery custom terpasang di **kedua slot**.
 - Sebagian build OrangeFox/TWRP gagal memasang payload OTA (`kInstallDeviceOpenError` / error 7). Kalau itu terjadi, build ulang dengan `package_type: recovery`.
 
-**`recovery`** - installer shell (cara lama):
+**`recovery`** - zip gaya LightOS / xiaomi.eu (folder `images/`, ditulis installer shell):
 
 ```
 META-INF/                       installer (cuma flash, tanpa wipe)
-images/*.img                    firmware + boot, vendor_boot, dtbo, vbmeta (slot A+B)
-images/super.img.zst            super (system/system_ext/product donor + vendor/odm ingres)
+images/abl.img aop.img ... xbl.img xbl_config.img xbl_ramdump.img
+                                firmware ingres (slot A+B), dari firmware_url
+images/boot.img vendor_boot.img dtbo.img vbmeta.img vbmeta_system.img recovery.img
+images/super.img                super UTUH (raw, ukuran = partisi super 9126805504 byte)
 ```
+
+- **Firmware** (`firmware_url`): base LineageOS tidak membawa firmware, jadi diambil dari OTA full / fastboot ROM stok ingres. Default **HyperOS 2 OS2.0.5.0.ULJCNXM** (versi yang sama dengan `ro.vendor.build.fingerprint` vendor LineageOS 23.2). Hanya partisi firmware (`FIRMWARE_PARTS`: abl aop aop_config bluetooth cpucp devcfg dsp featenabler hyp imagefv keymaster modem qupfw shrm tz uefi uefisecapp xbl xbl_config xbl_ramdump), tidak pernah persist/modemst/dll. Device ROM sumber **wajib ingres** (`pre-device` OTA / `flash_all.sh`), selain itu build berhenti. `none` = tanpa firmware. Jangan flash kalau HP sudah memakai firmware yang lebih baru (anti-rollback).
+- **super.img utuh** (`RECOVERY_SUPER=raw`, default): sebelum apa pun di-flash, installer mencocokkan ukuran `super.img` di zip dengan partisi super; recovery yang `unzip`-nya tidak mendukung zip64 (file > 4 GB) dibatalkan dengan aman. `RECOVERY_SUPER=zst` = `super.img.zst` (zip lebih kecil).
 
 - recovery: TWRP D2N (default `recovery_img_url`) ditulis ke slot A dan B; kosongkan input itu untuk mempertahankan recovery di HP. Isi ditulis langsung pakai `dd`, slot aktif diset A, status OTA lama dibatalkan.
 - Perintah format/wipe di META-INF dinetralkan; kalau masih ada yang lolos, build sengaja gagal.
@@ -183,7 +188,8 @@ images/super.img.zst            super (system/system_ext/product donor + vendor/
 | `base_rom_url` | OTA ROM AOSP ingres (`.zip` payload.bin), atau fastboot MIUI/HyperOS ingres (`.tgz`), atau zip xiaomi.eu ingres |
 | `port_rom_url` | OTA ROM AOSP donor (`.zip` berisi `payload.bin`). Link bertanda tangan sementara (mis. tombol download AfterLife: `...digitaloceanspaces.com/...?X-Amz-Expires=3600`, berlaku 1 jam) dicek masa berlakunya di awal dan diunduh lebih dulu sebelum base; kalau sudah kedaluwarsa, workflow langsung berhenti dengan pesan jelas. Ambil link baru tepat sebelum menjalankan workflow, atau unggah ROM ke tempat permanen |
 | `super_size` | `9126805504` (super ingres). Cek di HP: `su -c blockdev --getsize64 /dev/block/by-name/super` |
-| `package_type` | `ota` (default, zip payload.bin seperti ROM AOSP) atau `recovery` (images + super.img.zst, ditulis dd) |
+| `package_type` | `ota` (default, zip payload.bin seperti ROM AOSP) atau `recovery` (folder `images/`: firmware + boot + recovery + `super.img` utuh, seperti zip LightOS) |
+| `firmware_url` | `package_type: recovery`: firmware ingres dari OTA full / fastboot ROM stok ingres. Default HyperOS 2 OS2.0.5.0.ULJCNXM. `none` = tanpa firmware |
 | `ext4_partitions` | `vendor odm system vendor_dlkm product system_ext` (bisa diedit langsung di HP). Kalau super tidak muat, partisi EXT4 terbesar otomatis jadi EROFS. `vendor_dlkm` dipakai apa adanya dari base (read-only) |
 | `debloat` | path/package/nama folder tambahan, pisah spasi (nama folder boleh wildcard, mis. `Foo*`). Awalan `!` = pertahankan. Boleh kosong |
 | `debloat_aosp` | `true` di Port AOSP & Port AxionOS (`false` di Port ColorOS). Pakai `debloat_aosp.txt`: daftar *Debloat Full AOSP A16 (11.1)* (TalkBack, Chrome, Photos, Calendar, Android Auto, Wellbeing, Recorder, OmniJaws, Google TTS, Stk, Print, Seedvault, ...) + tambahan aman (Meet, Google One, YouTube Music, Play Books/Movies, Lens, easter egg, tracing). Nama folder berversi dicocokkan dengan wildcard (`SoundAmplifierPrebuilt*`). `HotwordEnrollment*` dipertahankan kalau addon `hotword` dipakai; aplikasi inti (SystemUI, Settings, GMS, Play Store, WebView, launcher, keyboard) selalu dilindungi. Penghapusan SetupWizard dari zip aslinya **tidak** diambil (bisa macet di setup setelah Format Data). Batalkan per item: `debloat: !CalendarGooglePrebuilt` |
@@ -241,7 +247,7 @@ Balik ke recovery sendiri setelah logo = biasanya sepolicy (`init: ... Failed to
 | `PROP_MERGE_ALLOW` | regex props base yang disalin (di `scripts/port.sh`) |
 | `FIRST_API_LEVEL`, `LCD_DENSITY` | `auto` atau angka |
 | `NEVER_FLASH` | partisi yang tidak pernah di-flash (di `scripts/port.sh`) |
-| `RECOVERY_SUPER` | `zst` (default) / `raw` |
+| `RECOVERY_SUPER` | `raw` (default, `super.img` utuh) / `zst` |
 | `HYPEROS_BASE_OVERLAYS` | RRO yang disalin dari base HyperOS (default `AospFrameworkResOverlay`) |
 | `MIUICAMERA_DEVICE_REPO`, `MIUICAMERA_VENDOR_REPO`, `MIUICAMERA_BRANCH` | sumber addon MiuiCamera (default Gurinbone, `lineage-23.2`) |
 | `MIUICAMERA_SYMBOL_CHECK` | `true` = addon MiuiCamera dilewati kalau library JNI memakai simbol yang tidak ada di framework donor |

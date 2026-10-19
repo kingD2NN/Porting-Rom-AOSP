@@ -12,13 +12,18 @@ on:
         required: true
         type: string
       package_type:
-        description: "Format zip: ota = payload.bin seperti ROM AOSP/LineageOS (flash di recovery) | recovery = images + super.img.zst (dd)"
+        description: "Format zip: ota = payload.bin seperti ROM AOSP/LineageOS (flash di recovery) | recovery = folder images/ (firmware + boot + recovery + super.img utuh) seperti zip LightOS/xiaomi.eu"
         required: false
         default: ota
         type: choice
         options:
           - ota
           - recovery
+      firmware_url:
+        description: "package_type recovery: firmware ingres (xbl, tz, modem, ...) dari OTA full / fastboot ROM stok ingres, ikut di images/ seperti zip LightOS/xiaomi.eu. Default HyperOS 2 OS2.0.5.0 (sama dengan vendor LineageOS 23.2). none = tanpa firmware"
+        required: false
+        default: "https://cdnorg.d.miui.com/OS2.0.5.0.ULJCNXM/ingres-ota_full-OS2.0.5.0.ULJCNXM-user-14.0-f4c2771903.zip"
+        type: string
       super_size:
         description: "Ukuran partisi super (byte). ingres = 9126805504. auto = baca dari ROM base"
         required: false
@@ -128,6 +133,7 @@ on:
       base_rom_url: { type: string, required: true }
       port_rom_url: { type: string, required: true }
       package_type: { type: string, required: false, default: ota }
+      firmware_url: { type: string, required: false, default: "https://cdnorg.d.miui.com/OS2.0.5.0.ULJCNXM/ingres-ota_full-OS2.0.5.0.ULJCNXM-user-14.0-f4c2771903.zip" }
       super_size: { type: string, required: false, default: "9126805504" }
       ext4_partitions: { type: string, required: false, default: "vendor odm system vendor_dlkm product system_ext" }
       debloat: { type: string, required: false, default: "" }
@@ -188,7 +194,7 @@ env:
   FIRST_API_LEVEL: auto        # ingres rilis Android 12 -> 31
   LCD_DENSITY: auto
   INSTALLER: auto              # auto | base (META-INF zip base, mis. xiaomi.eu) | ours
-  RECOVERY_SUPER: zst          # package_type recovery: zst (zip kecil) | raw
+  RECOVERY_SUPER: raw          # package_type recovery: raw = images/super.img utuh (seperti LightOS) | zst = super.img.zst
   OTA_XZ_PRESET: "6"           # package_type ota: level xz payload (6 = AOSP; 3 = build ~2x lebih cepat, zip ~7% lebih besar)
   GBOARD_APK: ""               # opsional: URL Gboard -> keyboard sistem
   GBOARD_PACKAGE: com.google.android.inputmethod.latin
@@ -342,6 +348,7 @@ jobs:
           DOLBY_UI: ${{ inputs.dolby_ui }}
           LUNARIS_DOLBY_APK: ${{ inputs.lunaris_apk_url }}
           PACKAGE_TYPE: ${{ inputs.package_type }}
+          FIRMWARE_URL: ${{ inputs.firmware_url }}
           BOOT_IMG: ${{ inputs.boot_img_url }}
           DISABLE_ENCRYPTION: ${{ inputs.disable_encryption }}
           RW_MOUNT: ${{ inputs.rw_mount }}

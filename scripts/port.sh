@@ -71,7 +71,12 @@ OVERLAY_FIX=${OVERLAY_FIX:-true}           # buang overlay khas donor, salin ove
 # recovery = zip installer shell: images/super.img(.zst) ditulis dd ke partisi super (cara lama)
 PACKAGE_TYPE=${PACKAGE_TYPE:-ota}
 INSTALLER=${INSTALLER:-auto}                # auto | base (META-INF dari ROM base, mis. xiaomi.eu) | ours (PACKAGE_TYPE=recovery)
-RECOVERY_SUPER=${RECOVERY_SUPER:-zst}      # hanya INSTALLER=ours: raw = images/super.img | zst = images/super.img.zst
+RECOVERY_SUPER=${RECOVERY_SUPER:-raw}      # hanya INSTALLER=ours: raw = images/super.img (utuh) | zst = images/super.img.zst
+# PACKAGE_TYPE=recovery: firmware ingres (xbl, tz, modem, ...) ikut di images/ seperti zip ROM xiaomi.eu /
+# LightOS. Sumber: OTA full / fastboot ROM stok ingres (dicek pre-device / flash_all = TARGET_DEVICE).
+# Kosong / none = tanpa firmware. Dilewati kalau ROM base sudah membawa firmware.
+FIRMWARE_URL=${FIRMWARE_URL:-}
+FIRMWARE_PARTS=${FIRMWARE_PARTS:-"abl aop aop_config bluetooth cpucp devcfg dsp featenabler hyp imagefv keymaster modem qupfw shrm tz uefi uefisecapp xbl xbl_config xbl_ramdump"}
 RECOVERY_IMG=${RECOVERY_IMG:-}              # opsional: URL/path recovery.img custom (OrangeFox dll)
 BOOT_IMG=${BOOT_IMG:-}                      # opsional: URL/path boot.img custom (kernel), menggantikan boot.img base
 # kernel custom dicek terhadap modul vendor base (CRC simbol, scripts/kernel_crc.py). Modul yang bisa
@@ -1893,6 +1898,67 @@ write_recovery_pkg() {
     log "recovery : $( [[ $flash_rec == true ]] && echo "diganti (RECOVERY_IMG)" || echo "tidak di-flash (recovery HP dipertahankan)")"
 }
 
+# firmware ingres dari ROM stok (FIRMWARE_URL) -> dst (images/ paket recovery). Hanya partisi
+# FIRMWARE_PARTS; device ROM sumber WAJIB sama dengan TARGET_DEVICE (firmware device lain = hard brick).
+add_firmware() { # dst
+    local dst=$1 src fw="$WORK/fw" magic dev="" p have="" miss="" list="" f anti=""
+    case ${FIRMWARE_URL,,} in ""|none|off|false) log "firmware: FIRMWARE_URL kosong, paket tanpa firmware"; return 0 ;; esac
+    if [[ -f $dst/xbl.img || -f $dst/xbl_config.img ]]; then
+        ok "firmware: ROM base sudah membawa firmware, FIRMWARE_URL tidak dipakai"; return 0
+    fi
+    src=$(fetch "$FIRMWARE_URL" "$WORK/dl" firmware_rom)
+    rm -rf "$fw"; mkdir -p "$fw"
+    magic=$(head -c 4 "$src" | od -An -tx1 | tr -d ' \n')
+    if [[ $magic == 504b0304 ]] && unzip -l "$src" payload.bin >/dev/null 2>&1; then
+        # OTA full: device dari META-INF/com/android/metadata
+        dev=$(unzip -p "$src" META-INF/com/android/metadata 2>/dev/null | sed -n 's/^pre-device=//p' | head -n1 | cut -d, -f1)
+        if [[ -z $dev ]] && unzip -p "$src" META-INF/com/android/metadata.pb 2>/dev/null | strings -n 3 | grep -qx "$TARGET_DEVICE"; then
+            dev=$TARGET_DEVICE
+        fi
+        [[ $dev == "$TARGET_DEVICE" ]] || die "firmware: ROM sumber untuk device '${dev:-?}', bukan $TARGET_DEVICE (firmware device lain = hard brick): $FIRMWARE_URL"
+        unzip -p "$src" payload.bin > "$fw/payload.bin"
+        local avail
+        python3 "$SCRIPT_DIR/lp_tool.py" payload "$fw/payload.bin" > "$WORK/fw_payload.env"
+        avail=$(env_get "$WORK/fw_payload.env" PAYLOAD_PARTITIONS)
+        for p in $FIRMWARE_PARTS; do
+            if in_list "$p" "$avail"; then list+="${list:+,}$p"; else miss+=" $p"; fi
+        done
+        [[ -n $list ]] || die "firmware: tidak ada partisi firmware di payload ROM sumber (isi: $avail)"
+        payload-dumper-go -c "$(nproc)" -p "$list" -o "$fw/img" "$fw/payload.bin" > "$WORK/pdg_fw.log" 2>&1 \
+            || { tail -n 20 "$WORK/pdg_fw.log" >&2; die "firmware: payload-dumper-go gagal"; }
+        rm -f "$fw/payload.bin"
+    else
+        # fastboot ROM (tgz / zip): device & anti-rollback dari flash_all.sh
+        case $magic in
+            504b0304) unzip -q "$src" -d "$fw/x" ;;
+            *)        mkdir -p "$fw/x"; tar -xf "$src" -C "$fw/x" ;;
+        esac
+        f=$(find "$fw/x" -maxdepth 3 -name 'flash_all.sh' | head -n1)
+        [[ -n $f ]] && grep -qE "product: *$TARGET_DEVICE|\b$TARGET_DEVICE\b" "$f" \
+            || die "firmware: ROM sumber bukan fastboot ROM $TARGET_DEVICE (flash_all.sh tidak menyebut $TARGET_DEVICE): $FIRMWARE_URL"
+        anti=$(grep -oE 'CURRENT_ANTI_VER=[0-9]+' "$f" | head -n1 | cut -d= -f2 || true)
+        mkdir -p "$fw/img"
+        for p in $FIRMWARE_PARTS; do
+            f=$(find "$fw/x" -type f -name "$p.img" | head -n1)
+            if [[ -n $f ]]; then mv -f "$f" "$fw/img/"; else miss+=" $p"; fi
+        done
+        rm -rf "$fw/x"
+    fi
+    if ! is_true "$KEEP_DOWNLOADS" && [[ $src == "$WORK/dl/"* ]]; then rm -f "$src"; fi
+    for f in "$fw"/img/*.img; do
+        [[ -f $f ]] || continue
+        p=$(basename "$f" .img)
+        if in_list "$p" "$NEVER_FLASH"; then rm -f "$f"; continue; fi
+        mv -f "$f" "$dst/"; have+=" $p"
+    done
+    rm -rf "$fw"
+    [[ -n $have ]] || die "firmware: tidak ada image firmware yang didapat dari $FIRMWARE_URL"
+    if [[ -n $anti ]]; then ANTI_VER=$anti; fi
+    ok "firmware ${dev:-$TARGET_DEVICE} ikut di paket (slot A+B):$have"
+    if [[ -n $miss ]]; then log "  tidak ada di ROM sumber (dilewati):$miss"; fi
+    warn "firmware: ROM ini mem-flash firmware stok ($(basename "${FIRMWARE_URL%%\?*}")). Jangan flash kalau HP memakai firmware lebih BARU (anti-rollback${ANTI_VER:+ $ANTI_VER})"
+}
+
 # recovery.img custom (TWRP/OrangeFox) menggantikan recovery base. Dicek: image boot Android
 # (magic ANDROID!) dan tidak lebih besar dari partisi recovery (= recovery.img base).
 put_recovery() { # dest (berisi recovery.img base kalau ada)
@@ -2038,6 +2104,7 @@ main() {
     check_url BASE_ROM "$BASE_ROM"
     check_url PORT_ROM "$PORT_ROM"
     if [[ -n $RECOVERY_IMG ]]; then check_url RECOVERY_IMG "$RECOVERY_IMG"; fi
+    if [[ $PACKAGE_TYPE == recovery && -n $FIRMWARE_URL && ! ${FIRMWARE_URL,,} =~ ^(none|off|false)$ ]]; then check_url FIRMWARE_URL "$FIRMWARE_URL"; fi
     if [[ -n $BOOT_IMG ]]; then check_url BOOT_IMG "$BOOT_IMG"; fi
     if [[ -n $GBOARD_APK ]]; then check_url GBOARD_APK "$GBOARD_APK"; fi
     if [[ -n $GPU_DRIVER_URL ]] && addon_requested gpudriver; then check_url GPU_DRIVER_URL "$GPU_DRIVER_URL"; fi
@@ -2264,6 +2331,7 @@ main() {
     # ---------------- 7. PACKAGE
     group_start "7/7 Paket recovery flashable"
     prune_base_images
+    if [[ $mode != base ]]; then add_firmware "$B_IMG"; fi
     mv "$B_IMG"/* "$pkg/images/" 2>/dev/null || true
     if [[ -n $RECOVERY_IMG ]]; then
         put_recovery "$pkg/images/recovery.img"
@@ -2294,6 +2362,7 @@ main() {
         echo "super_size=$SUPER_SIZE"; echo "super_format=$RECOVERY_SUPER"
         echo "boot_img=${BOOT_USED:-${BOOT_IMG:-base}}"; echo "installer=$mode"
         echo "anti_ver=${ANTI_VER:-unknown}"; echo "build_date=$stamp"
+        echo "firmware=$(cd "$pkg/images" && ls xbl.img >/dev/null 2>&1 && echo "${FIRMWARE_URL##*/}" || echo none)"
     } > "$pkg/META-INF/port_info.txt"
     ls -la "$pkg/images"
     (cd "$pkg" && zip -q -r -"$ZIP_LEVEL" -n .zst "$OUT/$name.zip" .)

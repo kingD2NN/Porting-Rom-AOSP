@@ -134,6 +134,14 @@ fi
 # ---- cek isi zip
 unzip -l "$ZIPFILE" images/super.img images/super.img.zst 2>/dev/null | grep -q "images/super" \
     || abort "images/super tidak ada di zip"
+# super raw > 4 GB = entri zip64: unzip recovery yang tidak mendukung zip64 membaca ukuran salah dan
+# menulis super terpotong. Dicek SEBELUM apa pun di-flash.
+if [ "$SUPER_FORMAT" = "raw" ]; then
+    zsz=$(unzip -l "$ZIPFILE" images/super.img 2>/dev/null | awk '$NF == "images/super.img" {print $1; exit}')
+    if [ "$zsz" != "$SUPER_BYTES" ]; then
+        abort "unzip recovery membaca super.img ${zsz:-?} byte (harus $SUPER_BYTES): recovery tidak mendukung zip64. Pakai TWRP/OrangeFox terbaru"
+    fi
+fi
 
 if [ -n "$ANTI_VER" ]; then
     ui_print "- Firmware anti-rollback ROM: $ANTI_VER"

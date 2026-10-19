@@ -44,13 +44,18 @@ on:
           - skiavkthreaded
           - vendor
       package_type:
-        description: "ota = payload.bin (flash di recovery) | recovery = images + super.img.zst"
+        description: "ota = payload.bin (flash di recovery) | recovery = folder images/ (firmware + boot + recovery + super.img utuh) seperti zip LightOS/xiaomi.eu"
         required: false
         default: ota
         type: choice
         options:
           - ota
           - recovery
+      firmware_url:
+        description: "package_type recovery: firmware ingres (xbl, tz, modem, ...) dari OTA full / fastboot ROM stok ingres, ikut di images/ seperti zip LightOS/xiaomi.eu. Default HyperOS 2 OS2.0.5.0 (sama dengan vendor LineageOS 23.2). none = tanpa firmware"
+        required: false
+        default: "https://cdnorg.d.miui.com/OS2.0.5.0.ULJCNXM/ingres-ota_full-OS2.0.5.0.ULJCNXM-user-14.0-f4c2771903.zip"
+        type: string
       super_size:
         description: "Ukuran partisi super (byte). ingres = 9126805504"
         required: false
@@ -141,6 +146,7 @@ jobs:
       base_rom_url: ${{ inputs.base_rom_url }}
       port_rom_url: ${{ inputs.port_rom_url }}
       package_type: ${{ inputs.package_type }}
+      firmware_url: ${{ inputs.firmware_url }}
       super_size: ${{ inputs.super_size }}
       ext4_partitions: "vendor odm system vendor_dlkm product system_ext"
       debloat: ${{ inputs.debloat }}
